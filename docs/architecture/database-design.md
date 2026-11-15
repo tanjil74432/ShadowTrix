@@ -37,6 +37,10 @@ Conventions: UUIDv7 ids; `created_at`/`updated_at` as `timestamptz`; snake_case 
 | Roles | RBAC incl. scoped roles | Dropped the `roles` lookup table in favor of an enum plus scoped `user_roles`. NULL-scope uniqueness is enforced with three partial unique indexes (Postgres treats NULLs as distinct) |
 | Auditability | Admin/organizer actions | `audit_logs` with before/after JSON |
 
+## Change log
+
+- **v1.1 (Milestone 3):** added `events.judging_starts_at`, `judging_ends_at` and `results_announcement_at` (planned result date; `results_published_at` remains the actual publication time) so every event can show its five distinct phases: registration, event, submission, judging, results. Added ordering CHECK constraints (judging after submission deadline, results after judging) with tests. Declared the `org_members_public_idx` index in the Prisma schema so migrations no longer try to drop it.
+
 ## Integrity rules enforced by the database (and tested)
 
 CHECK constraints: lower-case emails; event `ends_at > starts_at`; registration window within the event; submission deadline ≥ start; capacity > 0; team events require `min_team_size ≥ 1` and `max ≥ min`; criteria max/weight > 0; scores ≥ 0; results/rank ranges; file size ≥ 0; membership/term date order.

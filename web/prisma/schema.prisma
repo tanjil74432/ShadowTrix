@@ -263,6 +263,9 @@ model Event {
   registrationOpensAt  DateTime         @map("registration_opens_at") @db.Timestamptz(3)
   registrationClosesAt DateTime         @map("registration_closes_at") @db.Timestamptz(3)
   submissionDeadline   DateTime?        @map("submission_deadline") @db.Timestamptz(3)
+  judgingStartsAt      DateTime?        @map("judging_starts_at") @db.Timestamptz(3)
+  judgingEndsAt        DateTime?        @map("judging_ends_at") @db.Timestamptz(3)
+  resultsAnnouncementAt DateTime?       @map("results_announcement_at") @db.Timestamptz(3) // planned date; resultsPublishedAt is the actual publication
   registrationManuallyClosed Boolean    @default(false) @map("registration_manually_closed")
   capacity             Int?
   registrationMode     RegistrationMode @default(INDIVIDUAL) @map("registration_mode")
@@ -621,6 +624,7 @@ model OrgMember {
   memberships   OrgMembership[]
   contributions OrgMemberContribution[]
 
+  @@index([visibility, status], map: "org_members_public_idx")
   @@map("org_members")
 }
 
