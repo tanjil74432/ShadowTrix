@@ -18,17 +18,17 @@ const button = (href: string, label: string) =>
   `<p style="margin:24px 0"><a href="${escapeHtml(href)}" style="background:#fff;color:#000;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:6px;display:inline-block">${escapeHtml(label)}</a></p>` +
   p(`If the button does not work, copy this address into your browser:<br><span style="word-break:break-all;color:#a3a3a3">${escapeHtml(href)}</span>`);
 
-export function verificationEmail(to: string, name: string, link: string, ttlHours: number): Mail {
+export function verificationEmail(to: string, link: string, ttlHours: number): Mail {
   return {
     to,
     subject: "Confirm your email address for ShadowTrix",
-    text: `Hello ${name},\n\nConfirm your email address to finish creating your ShadowTrix account:\n${link}\n\nThis link works once and expires in ${ttlHours} hours. If you did not create an account, you can ignore this email.`,
+    text: `Hello,\n\nSomeone asked to create a ShadowTrix account with this email address. Open the link below to confirm it is yours and choose a password.\n\n${link}\n\nThis link works once and expires in ${ttlHours} hours. If this was not you, ignore this email; no account will be activated.`,
     html: layout(
       "Confirm your email address",
-      p(`Hello ${escapeHtml(name)},`) +
-        p("Confirm your email address to finish creating your ShadowTrix account.") +
-        button(link, "Confirm email address") +
-        p(`This link works once and expires in ${ttlHours} hours. If you did not create an account, you can ignore this email.`),
+      p("Hello,") +
+        p("Someone asked to create a ShadowTrix account with this email address. Confirm it is yours and choose your password.") +
+        button(link, "Confirm email and choose password") +
+        p(`This link works once and expires in ${ttlHours} hours. If this was not you, ignore this email; no account will be activated.`),
     ),
   };
 }

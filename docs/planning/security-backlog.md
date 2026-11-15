@@ -8,7 +8,7 @@ Owner decisions that shape this list (recorded 2026-11-15): the first administra
 
 | # | Item | Why it matters | Status |
 |---|---|---|---|
-| C1 | **Close the pre-registration takeover risk.** Let the email owner set their password *after* verifying the email (registration collects only name and email; the confirmation link leads to a "choose your password" step). | Today an attacker can register a victim's address with a password they know; if the victim clicks the confirmation link anyway, the attacker's password is live. Newer registrations replace unverified ones, which only reduces the risk. | Open (changes the signup flow; needs a design review) |
+| C1 | **Close the pre-registration takeover risk.** Registration collects only an email; the mailbox owner chooses name and password on the emailed link's page. | Previously an attacker could register a victim's address with a password they know. | **Done and tested** on `feature/milestone-4-authentication` (migration `20261115180000`, unit + integration + e2e tests, CI pending on the new commit). Not yet independently reviewed (see C6). |
 | C2 | **Content-Security-Policy** after reviewing every script, style, font and image source (Next.js needs a nonce strategy). | Limits the damage of any future XSS. | Open |
 | C3 | **Review session token lifecycle and rotation:** periodic rotation of a live session token, rotation on privilege change, concurrent-session limits, and the lifetimes (30 days absolute / 7 days idle). | Shortens the window for a stolen cookie. | Open (revocation on logout, reset and suspension already exists and is tested) |
 | C4 | **Scheduled cleanup** of expired sessions, spent and expired tokens, rate-limit rows, and unverified accounts past a grace period. | Bounded table growth; stale unverified accounts are takeover bait (see C1). Functions `purgeDeadSessions` and `purgeExpiredRateLimits` exist but nothing runs them. | Open |
@@ -30,13 +30,13 @@ Owner decisions that shape this list (recorded 2026-11-15): the first administra
 
 ## Done and verified (for reference)
 
-Argon2id hashing; hashed single-use tokens with concurrency tests; server-side sessions with revocation; role matrix and admin safeguards; rate limiting; Origin-based CSRF; open-redirect protection; enumeration resistance; 12-character password policy (registration and reset); security headers except CSP. See [authentication.md](../architecture/authentication.md) and the [Milestone 4 report](milestone-4-report.md).
+Signup redesign (C1): registration accepts only an email, the password is chosen by the verified mailbox owner, single-use atomic token, CHECK constraint forbids verified-without-password; tests include the attacker scenario, replay, 5 to 8-way concurrency, expiry, scanner prefetch and a rejected password not consuming the link. Argon2id hashing; hashed single-use tokens with concurrency tests; server-side sessions with revocation; role matrix and admin safeguards; rate limiting; Origin-based CSRF; open-redirect protection; enumeration resistance; 12-character password policy (registration and reset); security headers except CSP. See [authentication.md](../architecture/authentication.md) and the [Milestone 4 report](milestone-4-report.md).
 
 ## Decisions needed from the owner
 
 1. **Approve the pull requests** (PR 1 for Milestone 3, then PR 2 for Milestone 4) and authorize the merges. See [pull-requests.md](pull-requests.md). Nothing has been merged.
 2. **First administrator:** supply the owner's own account email when ready, and approve running `npm run admin:grant -- <email>`. Prerequisite: the account must already be registered and email-confirmed. No administrator has been granted and no default credentials exist.
-3. **C1 design approval:** accept changing signup so the password is chosen *after* the email is verified (this changes the registration flow and the e2e tests).
+3. ~~C1 design approval~~ Implemented under the accelerated work package; review it in PR 2. Note for you: the signup now has two steps and registration no longer asks for a name or password.
 4. **Admin MFA scope (A1):** confirm TOTP with recovery codes, optional for administrators; and whether administrators should get a shorter session lifetime or step-up re-authentication even without MFA.
 5. **Session lifetimes (C3):** confirm 30 days absolute / 7 days idle, or choose shorter values.
 6. **Sequence:** which items (C1 to C6) must be finished before Milestone 5, and which can run alongside it.

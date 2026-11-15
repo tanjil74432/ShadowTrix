@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ARGON2_PARAMS, burnPasswordVerification, hashPassword, needsRehash, verifyPassword } from "@/server/modules/auth/password";
 import { PASSWORD_HINT, PASSWORD_MAX, PASSWORD_MIN } from "@/lib/password-policy";
-import { loginSchema, passwordIssues, registerSchema, resetPasswordSchema } from "@/server/modules/auth/auth.schema";
+import { completeRegistrationSchema, loginSchema, passwordIssues, registerSchema, resetPasswordSchema } from "@/server/modules/auth/auth.schema";
 
 describe("password hashing (Argon2id)", () => {
   it("produces an Argon2id hash with the documented parameters, never the plaintext", async () => {
@@ -93,18 +93,20 @@ describe("password policy", () => {
 });
 
 describe("auth input schemas", () => {
-  it("normalizes email (trim, lowercase) and trims the name", () => {
-    const r = registerSchema.parse({ email: "  Test.User@Example.COM ", fullName: "  Ada Lovelace  ", password: "a long passphrase here" });
-    expect(r.email).toBe("test.user@example.com");
+  it("normalizes email (trim, lowercase) and trims the name at the completion step", () => {
+    expect(registerSchema.parse({ email: "  Test.User@Example.COM " }).email).toBe("test.user@example.com");
+    const r = completeRegistrationSchema.parse({ token: "t".repeat(43), fullName: "  Ada Lovelace  ", password: "a long passphrase here" });
     expect(r.fullName).toBe("Ada Lovelace");
   });
 
   it("rejects bad emails, short names, markup in names and weak passwords with field-level messages", () => {
-    const bad = registerSchema.safeParse({ email: "not-an-email", fullName: "A", password: "short" });
+    expect(registerSchema.safeParse({ email: "not-an-email" }).success).toBe(false);
+    const token = "t".repeat(43);
+    const bad = completeRegistrationSchema.safeParse({ token, fullName: "A", password: "short" });
     expect(bad.success).toBe(false);
     const paths = bad.error!.issues.map((i) => i.path[0]);
-    expect(paths).toEqual(expect.arrayContaining(["email", "fullName", "password"]));
-    expect(registerSchema.safeParse({ email: "a@b.co", fullName: "<script>x</script>", password: "a long passphrase here" }).success).toBe(false);
+    expect(paths).toEqual(expect.arrayContaining(["fullName", "password"]));
+    expect(completeRegistrationSchema.safeParse({ token, fullName: "<script>x</script>", password: "a long passphrase here" }).success).toBe(false);
   });
 
   it("never discloses password rules at login, only that a value is required", () => {
@@ -112,12 +114,12 @@ describe("auth input schemas", () => {
     expect(loginSchema.safeParse({ email: "a@b.co", password: "" }).success).toBe(false);
   });
 
-  it("registration enforces the 12-character minimum: 11 rejected on the password field, 12 accepted", () => {
-    const base = { email: "ada@example.com", fullName: "Ada Lovelace" };
-    const eleven = registerSchema.safeParse({ ...base, password: "pq7-lmn-x2z" });
+  it("completing registration enforces the 12-character minimum: 11 rejected on the password field, 12 accepted", () => {
+    const base = { token: "t".repeat(43), fullName: "Ada Lovelace" };
+    const eleven = completeRegistrationSchema.safeParse({ ...base, password: "pq7-lmn-x2z" });
     expect(eleven.success).toBe(false);
     expect(eleven.error!.issues).toEqual([expect.objectContaining({ path: ["password"], message: "Use at least 12 characters." })]);
-    expect(registerSchema.safeParse({ ...base, password: "pq7-lmn-x2zk" }).success).toBe(true);
+    expect(completeRegistrationSchema.safeParse({ ...base, password: "pq7-lmn-x2zk" }).success).toBe(true);
   });
 
   it("password reset enforces the same minimum: 11 rejected, 12 accepted", () => {

@@ -11,7 +11,7 @@ export default function RegisterPage() {
   return (
     <AuthCard
       title="Create an account"
-      description="Join ShadowTrix to take part in competitions, form teams and keep a record of what you build."
+      description="Enter your email address. We will send a link to confirm it, and you choose your password after that."
       footer={
         <p>
           Already have an account?{" "}

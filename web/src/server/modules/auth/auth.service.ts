@@ -15,7 +15,8 @@ import {
 } from "@/server/modules/email/templates";
 import { enforceRateLimits, POLICIES } from "@/server/security/rate-limit";
 import { generateToken, hashToken } from "@/server/security/tokens";
-import type { LoginInput, RegisterInput } from "./auth.schema";
+import { ZodError } from "zod";
+import { passwordIssues, type CompleteRegistrationInput, type LoginInput, type RegisterInput } from "./auth.schema";
 import { burnPasswordVerification, hashPassword, needsRehash, verifyPassword } from "./password";
 import { createSession, revokeAllUserSessions, revokeSessionByToken, type SessionLimits, type SessionUser } from "./session.service";
 
@@ -103,13 +104,11 @@ function queueMail(deps: AuthDeps, mail: Mail) {
 // ───────────────────────────── Registration ─────────────────────────────
 
 /**
- * Creates an account, or quietly does the right thing for an existing address. The caller always receives the
- * same response, so the endpoint cannot be used to discover which emails are registered:
- *  - new email           -> account + verification email
- *  - unverified existing -> credentials replaced by the newest registration + fresh verification email
- *                           (so someone cannot squat an address they do not control)
+ * Step 1 of signup. Only an email address is accepted, so nobody can attach a password of their own choosing to an
+ * address they do not control (the pre-registration takeover). The caller always receives the same response:
+ *  - new email           -> pending account (no password) + confirmation email
+ *  - pending existing    -> a fresh confirmation email; older links stop working
  *  - verified existing   -> an "you already have an account" email to the real owner; nothing changes
- * The password is hashed on every path so response time does not differ either.
  */
 export async function registerUser(input: RegisterInput, ctx: RequestContext, deps: AuthDeps = defaultDeps()): Promise<void> {
   await enforceRateLimits(
@@ -120,35 +119,25 @@ export async function registerUser(input: RegisterInput, ctx: RequestContext, de
     deps.now(),
   );
 
-  const passwordHash = await hashPassword(input.password);
   const now = deps.now();
-  const db = getDb();
-
-  const result = await db
+  const result = await getDb()
     .$transaction(async (tx) => {
       const existing = await tx.user.findUnique({ where: { email: input.email } });
 
       if (!existing) {
+        // The display name is a neutral placeholder; the real name is entered by the verified owner in step 2.
         const user = await tx.user.create({
-          data: {
-            email: input.email,
-            fullName: input.fullName,
-            passwordHash,
-            roles: { create: { role: "PARTICIPANT" } },
-          },
+          data: { email: input.email, fullName: input.email.split("@")[0], passwordHash: null, roles: { create: { role: "PARTICIPANT" } } },
         });
         await writeAudit({ actorId: user.id, action: "auth.register", entityType: "user", entityId: user.id }, tx);
         const token = await issueToken(tx, user.id, "EMAIL_VERIFY", EMAIL_VERIFY_TTL_HOURS * 3_600_000, now);
-        return { kind: "verify" as const, name: user.fullName, token };
+        return { kind: "verify" as const, token };
       }
 
       if (!existing.emailVerifiedAt) {
         if (existing.status !== "ACTIVE") return { kind: "none" as const };
-        await tx.user.update({ where: { id: existing.id }, data: { passwordHash, fullName: input.fullName } });
-        // Anyone holding a session for the old registration is signed out.
-        await revokeAllUserSessions(existing.id, "re-registered", tx);
         const token = await issueToken(tx, existing.id, "EMAIL_VERIFY", EMAIL_VERIFY_TTL_HOURS * 3_600_000, now);
-        return { kind: "verify" as const, name: input.fullName, token };
+        return { kind: "verify" as const, token };
       }
 
       return { kind: "exists" as const, name: existing.fullName };
@@ -160,22 +149,48 @@ export async function registerUser(input: RegisterInput, ctx: RequestContext, de
     });
 
   if (result.kind === "verify" && result.token) {
-    queueMail(deps, verificationEmail(input.email, result.name, linkTo("/verify-email", result.token), EMAIL_VERIFY_TTL_HOURS));
+    queueMail(deps, verificationEmail(input.email, linkTo("/verify-email", result.token), EMAIL_VERIFY_TTL_HOURS));
   } else if (result.kind === "exists") {
     queueMail(deps, alreadyRegisteredEmail(input.email, result.name, linkTo("/login"), linkTo("/forgot-password")));
   }
 }
 
-// ───────────────────────────── Email verification ─────────────────────────────
+// ───────────────────────────── Completing registration ─────────────────────────────
 
-export async function verifyEmail(token: string, ctx: RequestContext, deps: AuthDeps = defaultDeps()): Promise<void> {
+/**
+ * Step 2 of signup. The person holding the emailed token (so, the mailbox owner) chooses a name and password.
+ * In one transaction the token is consumed atomically (exactly one caller can win, even concurrently), the password
+ * is stored and the email is marked verified. The link alone never completes anything: this is only reached by an
+ * explicit form submission, so mail scanners that open the link cannot burn or use the token.
+ * A password the policy rejects is reported before the token is touched, so a typo never wastes the link.
+ */
+export async function completeRegistration(input: CompleteRegistrationInput, ctx: RequestContext, deps: AuthDeps = defaultDeps()): Promise<void> {
   await enforceRateLimits([{ scope: "token:ip", id: ctx.ip, policy: POLICIES.tokenSubmitIp }], deps.now());
+  const db = getDb();
+  const tokenHash = hashToken(input.token);
+
+  // Read-only look first: validate the token and the email-aware password rule without consuming anything.
+  const peek = await db.authToken.findUnique({
+    where: { tokenHash },
+    select: { type: true, usedAt: true, expiresAt: true, user: { select: { email: true, status: true } } },
+  });
+  if (!peek || peek.type !== "EMAIL_VERIFY" || peek.usedAt || peek.expiresAt <= deps.now() || peek.user.status !== "ACTIVE") {
+    // Comparable cost to the success path, so response time does not reveal whether the token ever existed.
+    await burnPasswordVerification(input.password);
+    throw invalidToken();
+  }
+  const issue = passwordIssues(input.password, peek.user.email);
+  if (issue) throw new ZodError([{ code: "custom", path: ["password"], message: issue, input: undefined }]);
+
+  const passwordHash = await hashPassword(input.password); // slow work outside the transaction
   const now = deps.now();
-  await getDb().$transaction(async (tx) => {
-    const userId = await consumeToken(tx, token, "EMAIL_VERIFY", now);
+  await db.$transaction(async (tx) => {
+    const userId = await consumeToken(tx, input.token, "EMAIL_VERIFY", now);
     if (!userId) throw invalidToken();
-    await tx.user.updateMany({ where: { id: userId, emailVerifiedAt: null }, data: { emailVerifiedAt: now } });
-    await writeAudit({ actorId: userId, action: "auth.email_verified", entityType: "user", entityId: userId }, tx);
+    await tx.user.update({ where: { id: userId }, data: { passwordHash, fullName: input.fullName, emailVerifiedAt: now } });
+    // Any other outstanding links for this account are void now.
+    await tx.authToken.updateMany({ where: { userId, usedAt: null, type: { in: ["PASSWORD_RESET", "EMAIL_VERIFY"] } }, data: { usedAt: now } });
+    await writeAudit({ actorId: userId, action: "auth.registration_completed", entityType: "user", entityId: userId }, tx);
   });
 }
 
@@ -193,7 +208,7 @@ export async function resendVerification(email: string, ctx: RequestContext, dep
   const user = await db.user.findUnique({ where: { email } });
   if (!user || user.emailVerifiedAt || user.status !== "ACTIVE") return;
   const token = await db.$transaction((tx) => issueToken(tx, user.id, "EMAIL_VERIFY", EMAIL_VERIFY_TTL_HOURS * 3_600_000, now));
-  if (token) queueMail(deps, verificationEmail(user.email, user.fullName, linkTo("/verify-email", token), EMAIL_VERIFY_TTL_HOURS));
+  if (token) queueMail(deps, verificationEmail(user.email, linkTo("/verify-email", token), EMAIL_VERIFY_TTL_HOURS));
 }
 
 // ───────────────────────────── Login / logout ─────────────────────────────
@@ -222,7 +237,8 @@ export async function login(input: LoginInput, ctx: RequestContext, deps: AuthDe
 
   const db = getDb();
   const user = await db.user.findUnique({ where: { email: input.email } });
-  if (!user) {
+  // A pending signup has no password yet; it fails exactly like an unknown address.
+  if (!user || !user.passwordHash) {
     await burnPasswordVerification(input.password);
     throw invalidCredentials();
   }
@@ -261,7 +277,8 @@ export async function requestPasswordReset(email: string, ctx: RequestContext, d
   const now = deps.now();
   const db = getDb();
   const user = await db.user.findUnique({ where: { email } });
-  if (!user || user.status !== "ACTIVE") return;
+  // A pending signup (no password, email unproven) finishes through its confirmation link, not a reset.
+  if (!user || user.status !== "ACTIVE" || !user.passwordHash) return;
   const token = await db.$transaction(async (tx) => {
     const t = await issueToken(tx, user.id, "PASSWORD_RESET", PASSWORD_RESET_TTL_MINUTES * 60_000, now);
     if (t) await writeAudit({ actorId: user.id, action: "auth.password_reset_requested", entityType: "user", entityId: user.id }, tx);

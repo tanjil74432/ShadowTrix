@@ -4,7 +4,7 @@ Implemented in `web/src/server/modules/{auth,authz,admin,email,audit}` and `web/
 
 ## Design in one paragraph
 
-Users register with email and password, confirm the address through an emailed single-use link, then log in. A successful login creates a **server-side session**: the browser receives a random opaque token in an HttpOnly cookie and the database stores only its SHA-256. Every request validates that session against the database (not revoked, not expired, not idle, user still active and verified) and loads the user's roles fresh. Authorization is decided on the server by a pure permission matrix; nothing the client sends is trusted for identity or role.
+Signup has two steps: the visitor enters **only an email address**, then proves they own the mailbox through an emailed single-use link and **chooses their name and password on that page**. After that they log in. A successful login creates a **server-side session**: the browser receives a random opaque token in an HttpOnly cookie and the database stores only its SHA-256. Every request validates that session against the database (not revoked, not expired, not idle, user still active and verified) and loads the user's roles fresh. Authorization is decided on the server by a pure permission matrix; nothing the client sends is trusted for identity or role.
 
 ## Decisions
 
@@ -20,15 +20,17 @@ Users register with email and password, confirm the address through an emailed s
 
 ## Flows
 
-**Registration** `POST /api/v1/auth/register`: validate (Zod) → rate limit → hash password (always, on every path) → in one transaction create the user with the PARTICIPANT role and a verification token. The response is identical whether the address is new, unverified or already registered:
+**Step 1, registration** `POST /api/v1/auth/register` `{ email }`: validate (Zod; any other field is ignored) → rate limit → in one transaction create a **pending** user (PARTICIPANT role, `password_hash` NULL, email unverified, neutral placeholder name) and a verification token. The response is identical whether the address is new, pending or already registered:
 
 | Address state | What happens | Email sent to the address |
 |---|---|---|
-| New | Account created | "Confirm your email address" |
-| Existing, unverified | Name and password replaced by the newest registration; old links voided | New confirmation link |
+| New | Pending account created (no password) | "Confirm your email address" |
+| Existing, pending | Nothing about the account changes; older links voided | New confirmation link |
 | Existing, verified | Nothing changes | "You already have an account" (to the real owner) |
 
-**Email confirmation:** the link opens `/verify-email?token=…`, which only shows a button. The token is consumed by the POST the button sends, so mail scanners and link previewers (which fetch URLs automatically) cannot burn a single-use token.
+**Step 2, completion** `POST /api/v1/auth/complete-registration` `{ token, fullName, password }`: the emailed link opens `/verify-email?token=…`, which shows a form. Only submitting the form calls the API, so mail scanners and link previewers (which fetch URLs automatically) cannot consume the token or choose a password. The service first checks the token and the password policy (including the email-name rule) *without consuming anything*, so a rejected password never wastes the link. It then hashes the password and, in one transaction, atomically claims the token (exactly one caller wins, even under concurrency), stores the hash and name, marks the email verified, voids other outstanding links and writes an audit entry. Unknown, used, expired, wrong-type or suspended-account tokens all return the same `invalid_token`.
+
+**Why this closes the pre-registration takeover:** a password can only be set by the holder of an emailed token, i.e. the mailbox owner. An attacker who registers a victim's address creates a pending account with no credentials; login with it fails exactly like an unknown address. Database guarantee: CHECK `users_verified_requires_password_chk` makes a verified account without a password impossible. Pending accounts cannot use password reset (that flow only serves accounts that have a password).
 
 **Login** `POST /api/v1/auth/login`: rate limit (per email, per IP when known) → look up user. Unknown email and wrong password return the same error at the same cost (a dummy Argon2 verification runs for unknown emails). Only after the password is proven correct does the server say "email not verified" or "suspended". Success mints a new session token (no session fixation), sets the cookie and writes an audit entry.
 
@@ -48,7 +50,7 @@ Users register with email and password, confirm the address through an emailed s
 | Cookie | `st_session` (`__Host-st_session`, with `Secure`, when `APP_URL` is https); HttpOnly; SameSite=Lax; Path=/ |
 | Absolute lifetime | 30 days (`SESSION_ABSOLUTE_TTL_DAYS`) |
 | Idle timeout | 7 days of no use (`SESSION_IDLE_TTL_DAYS`); `last_seen_at` is refreshed at most every 5 minutes |
-| Revoked by | logout, password reset, re-registration of an unverified address, suspension |
+| Revoked by | logout, password reset, suspension |
 | Rotation | New token at every login; all sessions replaced on password reset. There is no periodic rotation of a live session (see limitations). |
 | Stored | token hash, timestamps, revocation reason, truncated user agent. No IP address. |
 
@@ -78,6 +80,7 @@ Administrator safeguards (`admin-users.service.ts`): cannot demote or suspend yo
 |---|---|---|
 | Stolen database | Argon2id hashes; session and token hashes only; HMAC-keyed rate-limit keys | unit + integration tests assert raw tokens never appear in the database |
 | Credential stuffing, brute force | 8 attempts / 15 min per email, 40 / 15 min per IP (when trustworthy), generic errors | service + e2e tests (429, `Retry-After`) |
+| Pre-registration takeover | Registration accepts only an email; the password is chosen by the mailbox owner via the emailed token; DB CHECK forbids verified-without-password | unit, integration and e2e tests of the attacker scenario, replay, concurrency, scanner prefetch |
 | Account enumeration | Identical responses and cost for register, login, resend, forgot-password | e2e compares bodies and status; timing test |
 | Token theft from email | Single use, expiring, superseded by newer links, mail scanners cannot consume them | concurrency tests (exactly one winner) |
 | Session fixation / replay | New token per login; server-side revocation | e2e replays a copied cookie after logout and reset |
@@ -92,7 +95,7 @@ Administrator safeguards (`admin-users.service.ts`): cannot demote or suspend yo
 
 1. **No periodic session-token rotation** for a live session; rotation happens at login, password reset and suspension.
 2. **No scheduled cleanup.** `purgeDeadSessions` and `purgeExpiredRateLimits` exist but nothing runs them yet; expired rows are harmless but accumulate. Unverified accounts are not auto-expired.
-3. **Pre-registration risk is reduced, not eliminated.** If an attacker registers a victim's address with the attacker's password and the victim clicks the confirmation link anyway, the attacker's password is live. Mitigations: a newer registration replaces an unverified one, and the email says to ignore it if unexpected.
+3. **Pending accounts accumulate until cleanup exists.** The takeover risk is closed (see above), but unverified pending rows are not yet expired (scheduled cleanup is backlog item C4). Residual nuisance: anyone can trigger confirmation emails to an address (rate limited per address and per IP), and a new request voids the previous link.
 4. **No change-password screen for signed-in users, no email change, no multi-factor authentication (optional for admins by policy, not built), no social login, no "sign out other devices" screen.** Password reset covers recovery; the rest is planned work.
 5. **Content-Security-Policy is not set yet** (needs a nonce strategy); scheduled for the hardening milestone.
 6. **IP-based limits depend on `TRUST_PROXY`.** Route handlers cannot see the socket address, so without a trusted proxy only the per-account limits apply.

@@ -1,14 +1,14 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/server/db/client";
-import { registerSchema } from "@/server/modules/auth/auth.schema";
+import { completeRegistrationSchema, registerSchema } from "@/server/modules/auth/auth.schema";
 import {
+  completeRegistration,
   login,
   logout,
   registerUser,
   requestPasswordReset,
   resendVerification,
   resetPassword,
-  verifyEmail,
 } from "@/server/modules/auth/auth.service";
 import { burnPasswordVerification, hashPassword, verifyPassword } from "@/server/modules/auth/password";
 import { createSession, getSessionUser, purgeDeadSessions, revokeAllUserSessions } from "@/server/modules/auth/session.service";
@@ -24,7 +24,15 @@ vi.mock("@/server/modules/auth/password", async (importOriginal) => {
 });
 
 const DAY = 86_400_000;
-const reg = (email: string, password = PW, fullName = "Ada Lovelace") => registerSchema.parse({ email, fullName, password });
+const reg = (email: string) => registerSchema.parse({ email });
+const ATTACKER_PW = "an attacker chosen passphrase";
+const complete = (token: string, password = PW, fullName = "Ada Lovelace") => completeRegistrationSchema.parse({ token, fullName, password });
+/** Stored hash of a user, asserting there is one (pending signups have none). */
+const hashOf = async (userId: string) => {
+  const h = (await getDb().user.findUniqueOrThrow({ where: { id: userId } })).passwordHash;
+  if (!h) throw new Error("expected a stored password hash");
+  return h;
+};
 
 afterEach(cleanup);
 afterAll(async () => {
@@ -32,8 +40,8 @@ afterAll(async () => {
   await getDb().$disconnect();
 });
 
-describe("registration", () => {
-  it("creates an unverified participant, stores only an Argon2id hash, and emails a verification link", async () => {
+describe("registration (step 1: email only)", () => {
+  it("creates a pending participant with NO password, and emails a confirmation link", async () => {
     const h = makeHarness();
     const email = uniqueEmail();
     await registerUser(reg(email), ctx, h.deps);
@@ -41,10 +49,8 @@ describe("registration", () => {
 
     const user = await getDb().user.findUniqueOrThrow({ where: { email }, include: { roles: true, authTokens: true } });
     expect(user.emailVerifiedAt).toBeNull();
+    expect(user.passwordHash).toBeNull(); // nothing an attacker could have chosen
     expect(user.roles.map((r) => r.role)).toEqual(["PARTICIPANT"]);
-    expect(user.passwordHash).toMatch(/^\$argon2id\$/);
-    expect(user.passwordHash).not.toContain(PW);
-    expect(await verifyPassword(user.passwordHash, PW)).toBe(true);
 
     const mail = h.lastMailTo(email)!;
     expect(mail.subject).toMatch(/Confirm your email/);
@@ -53,41 +59,39 @@ describe("registration", () => {
     expect(user.authTokens).toHaveLength(1);
     expect(user.authTokens[0].tokenHash).toBe(hashToken(raw));
     expect(user.authTokens[0].tokenHash).not.toBe(raw);
-    expect(mail.text + mail.html).not.toContain(PW);
+  });
+
+  it("the registration schema accepts only an email: a supplied password or name is stripped, never stored", async () => {
+    const parsed = registerSchema.parse({ email: "Someone@Example.test", password: ATTACKER_PW, fullName: "Evil" });
+    expect(parsed).toEqual({ email: "someone@example.test" });
+    expect(registerSchema.safeParse({ email: "not-an-email" }).success).toBe(false);
   });
 
   it("answers identically for an existing verified address and tells only the real owner", async () => {
     const h = makeHarness();
     const owner = await createUser();
     const before = await getDb().user.count();
-    vi.mocked(hashPassword).mockClear();
-    await expect(registerUser(reg(owner.email, "an attacker chosen passphrase"), ctx, h.deps)).resolves.toBeUndefined();
+    await expect(registerUser(reg(owner.email), ctx, h.deps)).resolves.toBeUndefined();
     await h.flush();
 
     expect(await getDb().user.count()).toBe(before); // no new account
-    expect(await verifyPassword((await getDb().user.findUniqueOrThrow({ where: { id: owner.id } })).passwordHash, PW)).toBe(true); // password untouched
+    expect(await verifyPassword(await hashOf(owner.id), PW)).toBe(true); // password untouched
     expect(h.mailsTo(owner.email).map((m) => m.subject)).toEqual(["You already have a ShadowTrix account"]);
     expect(await getDb().authToken.count({ where: { userId: owner.id } })).toBe(0);
-    // The password is hashed on every path (including this "already registered" one), so the response time
-    // does not reveal that the address exists.
-    expect(vi.mocked(hashPassword)).toHaveBeenCalledTimes(1);
   });
 
-  it("lets a newer registration replace an unverified one (so nobody can squat an address) and voids the old link", async () => {
+  it("registering a pending address again sends a fresh link and voids the old one", async () => {
     const h = makeHarness();
     const email = uniqueEmail();
-    await registerUser(reg(email, "first attacker password"), ctx, h.deps);
+    await registerUser(reg(email), ctx, h.deps);
     const oldToken = tokenFrom(h.lastMailTo(email));
-    await registerUser(reg(email, PW, "Real Owner"), ctx, h.deps);
+    await registerUser(reg(email), ctx, h.deps);
     await h.flush();
     const newToken = tokenFrom(h.lastMailTo(email));
+    expect(newToken).not.toBe(oldToken);
 
-    const user = await getDb().user.findUniqueOrThrow({ where: { email } });
-    expect(user.fullName).toBe("Real Owner");
-    expect(await verifyPassword(user.passwordHash, PW)).toBe(true);
-    expect(await verifyPassword(user.passwordHash, "first attacker password")).toBe(false);
-    await expect(verifyEmail(oldToken, ctx, h.deps)).rejects.toMatchObject({ code: "invalid_token" });
-    await expect(verifyEmail(newToken, ctx, h.deps)).resolves.toBeUndefined();
+    await expect(completeRegistration(complete(oldToken), ctx, h.deps)).rejects.toMatchObject({ code: "invalid_token" });
+    await expect(completeRegistration(complete(newToken), ctx, h.deps)).resolves.toBeUndefined();
   });
 
   it("survives two simultaneous registrations of the same new address", async () => {
@@ -107,7 +111,67 @@ describe("registration", () => {
   });
 });
 
-describe("email verification tokens", () => {
+describe("pre-registration account takeover is closed", () => {
+  it("an attacker who registers a victim's address gets no credentials: login fails and the victim's own link sets the victim's password", async () => {
+    const h = makeHarness();
+    const victim = uniqueEmail("victim");
+    // The attacker (who does not control the mailbox) registers the victim's address. No password can be supplied.
+    await registerUser(reg(victim), ctx, h.deps);
+    await h.flush();
+
+    // The attacker cannot log in: not with the password they would like, nor any other.
+    await expect(login({ email: victim, password: ATTACKER_PW }, ctx, h.deps)).rejects.toMatchObject({ status: 401, code: "invalid_credentials" });
+
+    // The victim (who does control the mailbox) opens their link and chooses their own password.
+    await completeRegistration(complete(tokenFrom(h.lastMailTo(victim)), "the victims own long passphrase", "Real Victim"), ctx, h.deps);
+    const user = await getDb().user.findUniqueOrThrow({ where: { email: victim } });
+    expect(user.fullName).toBe("Real Victim");
+    expect(await verifyPassword(user.passwordHash!, "the victims own long passphrase")).toBe(true);
+    expect(await verifyPassword(user.passwordHash!, ATTACKER_PW)).toBe(false);
+
+    // The attacker still cannot get in; the victim can.
+    await expect(login({ email: victim, password: ATTACKER_PW }, ctx, h.deps)).rejects.toMatchObject({ code: "invalid_credentials" });
+    await expect(login({ email: victim, password: "the victims own long passphrase" }, ctx, h.deps)).resolves.toMatchObject({ user: { email: victim } });
+  });
+
+  it("a pending account is indistinguishable from an unknown one at login (same error, burns a verification)", async () => {
+    const h = makeHarness();
+    const email = uniqueEmail();
+    await registerUser(reg(email), ctx, h.deps);
+    vi.mocked(burnPasswordVerification).mockClear();
+    const pendingErr = await login({ email, password: PW }, ctx, h.deps).catch((e) => e);
+    const unknownErr = await login({ email: uniqueEmail("nobody"), password: PW }, ctx, h.deps).catch((e) => e);
+    expect({ status: pendingErr.status, code: pendingErr.code, message: pendingErr.message }).toEqual({
+      status: unknownErr.status,
+      code: unknownErr.code,
+      message: unknownErr.message,
+    });
+    expect(vi.mocked(burnPasswordVerification)).toHaveBeenCalledTimes(2);
+  });
+
+  it("the password-reset flow does not issue a link for a pending signup (no bypass of the confirmation step)", async () => {
+    const h = makeHarness();
+    const email = uniqueEmail();
+    await registerUser(reg(email), ctx, h.deps);
+    await h.flush();
+    const before = h.mailsTo(email).length;
+    await requestPasswordReset(email, ctx, h.deps);
+    await h.flush();
+    expect(h.mailsTo(email).length).toBe(before);
+    expect(await getDb().authToken.count({ where: { user: { email }, type: "PASSWORD_RESET" } })).toBe(0);
+  });
+
+  it("the database refuses a verified account without a password", async () => {
+    const u = await createUser({ verified: false });
+    await getDb().user.update({ where: { id: u.id }, data: { passwordHash: null } });
+    await expect(getDb().user.update({ where: { id: u.id }, data: { emailVerifiedAt: new Date() } })).rejects.toThrow(/users_verified_requires_password_chk/);
+    // and the inverse: dropping the password of a verified account is refused too
+    const v = await createUser();
+    await expect(getDb().user.update({ where: { id: v.id }, data: { passwordHash: null } })).rejects.toThrow(/users_verified_requires_password_chk/);
+  });
+});
+
+describe("completing registration (step 2: token + name + password)", () => {
   async function pendingUser(h: ReturnType<typeof makeHarness>) {
     const email = uniqueEmail();
     await registerUser(reg(email), ctx, h.deps);
@@ -115,40 +179,93 @@ describe("email verification tokens", () => {
     return { email, token: tokenFrom(h.lastMailTo(email)) };
   }
 
-  it("verifies once; reuse, garbage and unknown tokens are rejected with one generic error", async () => {
+  it("verifies the email, stores an Argon2id hash and the chosen name, and logs the event", async () => {
     const h = makeHarness();
     const { email, token } = await pendingUser(h);
-    await verifyEmail(token, ctx, h.deps);
-    expect((await getDb().user.findUniqueOrThrow({ where: { email } })).emailVerifiedAt).not.toBeNull();
+    await completeRegistration(complete(token), ctx, h.deps);
+    const user = await getDb().user.findUniqueOrThrow({ where: { email } });
+    expect(user.emailVerifiedAt).not.toBeNull();
+    expect(user.fullName).toBe("Ada Lovelace");
+    expect(user.passwordHash).toMatch(/^\$argon2id\$/);
+    expect(user.passwordHash).not.toContain(PW);
+    expect(await getDb().auditLog.count({ where: { actorId: user.id, action: "auth.registration_completed" } })).toBe(1);
+    await expect(login({ email, password: PW }, ctx, h.deps)).resolves.toMatchObject({ user: { email } });
+  });
 
+  it("is single-use: reuse, garbage and unknown tokens are rejected with one generic error", async () => {
+    const h = makeHarness();
+    const { token } = await pendingUser(h);
+    await completeRegistration(complete(token), ctx, h.deps);
     for (const bad of [token, "x".repeat(43), "0".repeat(20), token.slice(0, -1) + (token.endsWith("a") ? "b" : "a")]) {
-      await expect(verifyEmail(bad, ctx, h.deps), bad).rejects.toMatchObject({ status: 400, code: "invalid_token" });
+      await expect(completeRegistration(complete(bad), ctx, h.deps), bad).rejects.toMatchObject({ status: 400, code: "invalid_token" });
     }
+  });
+
+  it("a replay cannot overwrite the password that was chosen first", async () => {
+    const h = makeHarness();
+    const { email, token } = await pendingUser(h);
+    await completeRegistration(complete(token, PW), ctx, h.deps);
+    await expect(completeRegistration(complete(token, ATTACKER_PW, "Evil"), ctx, h.deps)).rejects.toMatchObject({ code: "invalid_token" });
+    const user = await getDb().user.findUniqueOrThrow({ where: { email } });
+    expect(user.fullName).toBe("Ada Lovelace");
+    expect(await verifyPassword(user.passwordHash!, PW)).toBe(true);
   });
 
   it("expires after 24 hours", async () => {
     const h = makeHarness();
-    const { token } = await pendingUser(h);
+    const { email, token } = await pendingUser(h);
     h.advance(24 * 3_600_000 + 1000);
-    await expect(verifyEmail(token, ctx, h.deps)).rejects.toMatchObject({ code: "invalid_token" });
+    await expect(completeRegistration(complete(token), ctx, h.deps)).rejects.toMatchObject({ code: "invalid_token" });
+    expect((await getDb().user.findUniqueOrThrow({ where: { email } })).passwordHash).toBeNull();
   });
 
-  it("is single-use even when submitted concurrently", async () => {
+  it("is single-use even when submitted concurrently: exactly one caller wins and the winner's password is the one stored", async () => {
     const h = makeHarness();
-    const { token } = await pendingUser(h);
-    const results = await Promise.allSettled(Array.from({ length: 8 }, () => verifyEmail(token, ctx, h.deps)));
+    const { email, token } = await pendingUser(h);
+    const passwords = Array.from({ length: 8 }, (_, i) => `concurrent passphrase number ${i}`);
+    const results = await Promise.allSettled(passwords.map((p) => completeRegistration(complete(token, p, "Ada Lovelace"), ctx, h.deps)));
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((r) => r.status === "rejected")).toHaveLength(7);
+    const winner = passwords[results.findIndex((r) => r.status === "fulfilled")];
+    const stored = (await getDb().user.findUniqueOrThrow({ where: { email } })).passwordHash!;
+    expect(await verifyPassword(stored, winner)).toBe(true);
   });
 
-  it("is not interchangeable with a password-reset token", async () => {
+  it("rejects a weak password WITHOUT consuming the link, so the person can try again", async () => {
+    const h = makeHarness();
+    const { email, token } = await pendingUser(h);
+    const localPart = email.split("@")[0];
+    // email-aware rule is enforced by the service (the schema alone cannot know the address)
+    await expect(completeRegistration({ token, fullName: "Ada Lovelace", password: `${localPart}-extra-words` }, ctx, h.deps)).rejects.toMatchObject({
+      issues: [expect.objectContaining({ path: ["password"], message: expect.stringMatching(/email/) })],
+    });
+    expect(await getDb().authToken.count({ where: { user: { email }, type: "EMAIL_VERIFY", usedAt: null } })).toBe(1);
+    await expect(completeRegistration(complete(token), ctx, h.deps)).resolves.toBeUndefined();
+  });
+
+  it("enforces the 12-character minimum at the schema: 11 rejected, 12 accepted", () => {
+    const token = "t".repeat(43);
+    expect(completeRegistrationSchema.safeParse({ token, fullName: "Ada Lovelace", password: "pq7-lmn-x2z" }).success).toBe(false);
+    expect(completeRegistrationSchema.safeParse({ token, fullName: "Ada Lovelace", password: "pq7-lmn-x2zk" }).success).toBe(true);
+    expect(completeRegistrationSchema.safeParse({ token, fullName: "<script>", password: PW }).success).toBe(false);
+    expect(completeRegistrationSchema.safeParse({ token, fullName: "A", password: PW }).success).toBe(false);
+  });
+
+  it("is not interchangeable with a password-reset token, and vice versa", async () => {
     const h = makeHarness();
     const u = await createUser({ verified: false });
     await requestPasswordReset(u.email, ctx, h.deps);
     await h.flush();
     const resetToken = tokenFrom(h.lastMailTo(u.email));
-    await expect(verifyEmail(resetToken, ctx, h.deps)).rejects.toMatchObject({ code: "invalid_token" });
+    await expect(completeRegistration(complete(resetToken), ctx, h.deps)).rejects.toMatchObject({ code: "invalid_token" });
     await expect(resetPassword({ token: await tokenOfType(u.id, "EMAIL_VERIFY"), password: NEW_PW }, ctx, h.deps)).rejects.toMatchObject({ code: "invalid_token" });
+  });
+
+  it("a suspended pending account cannot be completed", async () => {
+    const h = makeHarness();
+    const { email, token } = await pendingUser(h);
+    await getDb().user.update({ where: { email }, data: { status: "SUSPENDED" } });
+    await expect(completeRegistration(complete(token), ctx, h.deps)).rejects.toMatchObject({ code: "invalid_token" });
   });
 
   async function tokenOfType(userId: string, type: "EMAIL_VERIFY" | "PASSWORD_RESET") {
@@ -166,7 +283,7 @@ describe("email verification tokens", () => {
     await h.flush();
     const second = tokenFrom(h.lastMailTo(email));
     expect(second).not.toBe(first);
-    await expect(verifyEmail(first, ctx, h.deps)).rejects.toMatchObject({ code: "invalid_token" });
+    await expect(completeRegistration(complete(first), ctx, h.deps)).rejects.toMatchObject({ code: "invalid_token" });
 
     const verified = await createUser();
     const unknown = uniqueEmail("nobody");
@@ -271,7 +388,7 @@ describe("login", () => {
     const weak = await hash(PW, { algorithm: 2, memoryCost: 8192, timeCost: 1, parallelism: 1 });
     const u = await createUser({ passwordHash: weak });
     await login({ email: u.email, password: PW }, ctx, h.deps);
-    const after = (await getDb().user.findUniqueOrThrow({ where: { id: u.id } })).passwordHash;
+    const after = (await getDb().user.findUniqueOrThrow({ where: { id: u.id } })).passwordHash!;
     expect(after).toMatch(/m=65536,t=3,p=1/);
     expect(await verifyPassword(after, PW)).toBe(true);
   });
@@ -389,8 +506,8 @@ describe("password reset", () => {
     expect(await getSessionUser(s1.sessionToken)).toBeNull();
     expect(await getSessionUser(s2.sessionToken)).toBeNull();
     const fresh = await getDb().user.findUniqueOrThrow({ where: { id: u.id } });
-    expect(await verifyPassword(fresh.passwordHash, NEW_PW)).toBe(true);
-    expect(await verifyPassword(fresh.passwordHash, PW)).toBe(false);
+    expect(await verifyPassword(fresh.passwordHash!, NEW_PW)).toBe(true);
+    expect(await verifyPassword(fresh.passwordHash!, PW)).toBe(false);
     expect(await getDb().authToken.count({ where: { userId: u.id, usedAt: null } })).toBe(0);
     expect(h.mailsTo(u.email).at(-1)?.subject).toMatch(/password was changed/);
     expect(await getDb().auditLog.count({ where: { actorId: u.id, action: "auth.password_reset" } })).toBe(1);
@@ -416,7 +533,7 @@ describe("password reset", () => {
     h.advance(61 * 60_000);
     await expect(resetPassword({ token: second, password: NEW_PW }, ctx, h.deps)).rejects.toMatchObject({ code: "invalid_token" });
     // the password never changed
-    expect(await verifyPassword((await getDb().user.findUniqueOrThrow({ where: { id: u.id } })).passwordHash, PW)).toBe(true);
+    expect(await verifyPassword((await getDb().user.findUniqueOrThrow({ where: { id: u.id } })).passwordHash!, PW)).toBe(true);
   });
 
   it("proves control of the mailbox: resetting also verifies an unverified account", async () => {
@@ -471,7 +588,7 @@ describe("rate limiter", () => {
 describe("password hashing is in use (sanity)", () => {
   it("stored hashes verify and a fresh hash differs from the stored one", async () => {
     const u = await createUser();
-    expect(await verifyPassword(u.passwordHash, PW)).toBe(true);
-    expect(await hashPassword(PW)).not.toBe(u.passwordHash);
+    expect(await verifyPassword(u.passwordHash!, PW)).toBe(true);
+    expect(await hashPassword(PW)).not.toBe(u.passwordHash!);
   });
 });

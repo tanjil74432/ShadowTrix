@@ -42,6 +42,25 @@ async function apiLogin(request: import("@playwright/test").APIRequestContext, e
   return { res, cookie: res.ok() ? sessionCookieFrom(res) : "" };
 }
 
+const tokenFromMail = (mail: { link: (p: "verify-email" | "reset-password") => string }) =>
+  new URL(mail.link("verify-email")).searchParams.get("token") ?? "";
+
+/** Step 1 through the real form: only an email address is entered. */
+async function registerViaUi(page: import("@playwright/test").Page, email: string) {
+  await page.goto("/register");
+  await page.getByLabel(/^Email address/).fill(email);
+  await page.getByRole("button", { name: "Send confirmation link" }).click();
+  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+}
+
+/** Step 2 through the real form: open the emailed link, then choose a name and password. */
+async function completeViaUi(page: import("@playwright/test").Page, link: string, opts: { fullName?: string; password?: string } = {}) {
+  await page.goto(link);
+  await page.getByLabel(/^Full name/).fill(opts.fullName ?? "Ada Lovelace");
+  await page.getByLabel(/^Password/).fill(opts.password ?? PASSWORD);
+  await page.getByRole("button", { name: "Confirm email and activate account" }).click();
+}
+
 // ───────────────────────────── Journey ─────────────────────────────
 
 test.describe("registration, verification and login", () => {
@@ -50,23 +69,29 @@ test.describe("registration, verification and login", () => {
     users.track(email);
 
     await page.goto("/register");
-    await page.getByLabel(/^Full name/).fill("Ada Lovelace");
+    await expect(page.getByLabel(/^Password/)).toHaveCount(0); // no password is collected before the email is proven
+    await expect(page.getByLabel(/^Full name/)).toHaveCount(0);
     await page.getByLabel(/^Email address/).fill(email);
-    await page.getByLabel(/^Password/).fill(PASSWORD);
-    await page.getByRole("button", { name: "Create account" }).click();
+    await page.getByRole("button", { name: "Send confirmation link" }).click();
     await expect(page.getByRole("heading", { name: "Check your email" })).toBeFocused();
+    // the pending account holds no password
+    expect((await db().user.findUniqueOrThrow({ where: { email } })).passwordHash).toBeNull();
 
     const mail = await waitForMail(email, /Confirm your email/);
     expect(mail.text).not.toContain(PASSWORD);
     await page.goto(mail.link("verify-email"));
-    // The token is not consumed by merely opening the link (mail scanners prefetch links): only the button does it.
+    // The token is not consumed by merely opening the link (mail scanners prefetch links): only the form submission does it.
     expect((await db().user.findUniqueOrThrow({ where: { email } })).emailVerifiedAt).toBeNull();
-    await page.getByRole("button", { name: "Confirm email address" }).click();
-    await expect(page.getByRole("heading", { name: "Email address confirmed" })).toBeVisible();
-    expect((await db().user.findUniqueOrThrow({ where: { email } })).emailVerifiedAt).not.toBeNull();
+    await page.getByLabel(/^Full name/).fill("Ada Lovelace");
+    await page.getByLabel(/^Password/).fill(PASSWORD);
+    await page.getByRole("button", { name: "Confirm email and activate account" }).click();
+    await expect(page.getByRole("heading", { name: "Your account is ready" })).toBeVisible();
+    const stored = await db().user.findUniqueOrThrow({ where: { email } });
+    expect(stored.emailVerifiedAt).not.toBeNull();
+    expect(stored.passwordHash).toMatch(/^\$argon2id\$/);
 
     await page.getByRole("link", { name: "Log in" }).click();
-    await expect(page.getByText("Your email address is confirmed")).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Your email address is confirmed" })).toBeVisible();
     await page.getByLabel(/^Email address/).fill(email);
     await page.getByLabel(/^Password/).fill(PASSWORD);
     await page.getByRole("button", { name: "Log in" }).click();
@@ -91,23 +116,21 @@ test.describe("registration, verification and login", () => {
   test("an unconfirmed account cannot log in, and can request a new link", async ({ page, users }) => {
     const email = uniqueEmail("unverified");
     users.track(email);
-    await page.goto("/register");
-    await page.getByLabel(/^Full name/).fill("Grace Hopper");
-    await page.getByLabel(/^Email address/).fill(email);
-    await page.getByLabel(/^Password/).fill(PASSWORD);
-    await page.getByRole("button", { name: "Create account" }).click();
+    await registerViaUi(page, email);
     const first = await waitForMail(email, /Confirm your email/);
 
+    // A pending signup has no password, so login fails exactly like an unknown address.
     await uiLogin(page, { email, password: PASSWORD });
-    await expect(alertOf(page)).toContainText("Confirm your email address before logging in");
+    await expect(alertOf(page)).toHaveText("Incorrect email or password.");
     await expect(page).toHaveURL(/\/login/);
+    await page.goto("/verify-email");
+    await page.getByLabel(/^Email address/).fill(email);
     await page.getByRole("button", { name: "Send a new link" }).click();
     await expect(page.getByText(/we have sent a new link/)).toBeVisible();
 
     await expect.poll(() => mailCount(email)).toBe(2);
     // the first link was voided by the second
-    await page.goto(first.link("verify-email"));
-    await page.getByRole("button", { name: "Confirm email address" }).click();
+    await completeViaUi(page, first.link("verify-email"));
     await expect(page.getByRole("heading", { name: /invalid or has expired/ })).toBeVisible();
   });
 
@@ -124,17 +147,20 @@ test.describe("registration, verification and login", () => {
     expect((await page.context().cookies()).some((c) => c.name === COOKIE)).toBe(false);
   });
 
-  test("password rules are enforced by the server and shown on the field", async ({ page }) => {
-    await page.goto("/register");
-    await page.getByLabel(/^Full name/).fill("Test Person");
-    await page.getByLabel(/^Email address/).fill(uniqueEmail("weak"));
-    await page.getByLabel(/^Password/).fill("short");
-    await page.getByRole("button", { name: "Create account" }).click();
-    const field = page.getByLabel(/^Password/);
-    await expect(field).toHaveAttribute("aria-invalid", "true");
+  test("password rules are enforced by the server on the completion step and shown on the field", async ({ page, users }) => {
+    const email = uniqueEmail("weak");
+    users.track(email);
+    await registerViaUi(page, email);
+    const mail = await waitForMail(email, /Confirm your email/);
+    await completeViaUi(page, mail.link("verify-email"), { password: "short" });
+    await expect(page.getByLabel(/^Password/)).toHaveAttribute("aria-invalid", "true");
     await expect(page.getByText("Use at least 12 characters.")).toBeVisible();
+    // the rejected attempt did not use up the link
+    expect((await db().authToken.count({ where: { user: { email }, usedAt: null } }))).toBe(1);
+
+    await page.goto("/register");
     await page.getByLabel(/^Email address/).fill("not-an-email");
-    await page.getByRole("button", { name: "Create account" }).click();
+    await page.getByRole("button", { name: "Send confirmation link" }).click();
     await expect(page.getByText(/name@example.com/)).toBeVisible();
   });
 
@@ -219,11 +245,83 @@ test.describe("password reset", () => {
     await db().authToken.create({
       data: { userId: u.id, type: "EMAIL_VERIFY", tokenHash: sha256(raw), createdAt: new Date(Date.now() - 200_000_000), expiresAt: new Date(Date.now() - 100_000_000) },
     });
-    await page.goto("/verify-email?token=" + raw);
-    await page.getByRole("button", { name: "Confirm email address" }).click();
+    await completeViaUi(page, "/verify-email?token=" + raw);
     await expect(page.getByRole("heading", { name: /invalid or has expired/ })).toBeVisible();
     await expect(page.getByRole("button", { name: "Send a new link" })).toBeVisible();
     expect((await db().user.findUniqueOrThrow({ where: { id: u.id } })).emailVerifiedAt).toBeNull();
+  });
+});
+
+// ───────────────────────────── Pre-registration takeover ─────────────────────────────
+
+test.describe("pre-registration account takeover is closed", () => {
+  test("an attacker registering a victim's address gets nothing; the victim's own link sets the victim's password", async ({ page, request, users }) => {
+    const victim = uniqueEmail("victim");
+    users.track(victim);
+
+    // The attacker submits the victim's address, including a password and name they would like to attach.
+    const attack = await post(request, "/api/v1/auth/register", { email: victim, fullName: "Attacker", password: "an attacker chosen passphrase" });
+    expect(attack.status()).toBe(202);
+    const pending = await db().user.findUniqueOrThrow({ where: { email: victim } });
+    expect(pending.passwordHash).toBeNull(); // the supplied password was ignored, not stored
+    expect(pending.fullName).not.toBe("Attacker");
+    expect(pending.emailVerifiedAt).toBeNull();
+    expect((await apiLogin(request, victim, "an attacker chosen passphrase")).res.status()).toBe(401);
+
+    // Only the mailbox owner has the link. They open it and choose their own password.
+    const mail = await waitForMail(victim, /Confirm your email/);
+    await completeViaUi(page, mail.link("verify-email"), { fullName: "Real Victim", password: "the victims own long passphrase" });
+    await expect(page.getByRole("heading", { name: "Your account is ready" })).toBeVisible();
+
+    expect((await apiLogin(request, victim, "an attacker chosen passphrase")).res.status()).toBe(401);
+    expect((await apiLogin(request, victim, "the victims own long passphrase")).res.status()).toBe(200);
+    expect((await db().user.findUniqueOrThrow({ where: { email: victim } })).fullName).toBe("Real Victim");
+  });
+
+  test("the confirmation link is single-use: a replay cannot change the password", async ({ request, page, users }) => {
+    const email = uniqueEmail("replay");
+    users.track(email);
+    await registerViaUi(page, email);
+    const token = tokenFromMail(await waitForMail(email, /Confirm your email/));
+    const first = await post(request, "/api/v1/auth/complete-registration", { token, fullName: "First Person", password: "first chosen passphrase" });
+    expect(first.status()).toBe(200);
+    const replay = await post(request, "/api/v1/auth/complete-registration", { token, fullName: "Second Person", password: "second chosen passphrase" });
+    expect(replay.status()).toBe(400);
+    expect((await replay.json()).error.code).toBe("invalid_token");
+    expect((await apiLogin(request, email, "first chosen passphrase")).res.status()).toBe(200);
+    expect((await apiLogin(request, email, "second chosen passphrase")).res.status()).toBe(401);
+  });
+
+  test("concurrent submissions of one link: exactly one succeeds", async ({ request, page, users }) => {
+    const email = uniqueEmail("race");
+    users.track(email);
+    await registerViaUi(page, email);
+    const token = tokenFromMail(await waitForMail(email, /Confirm your email/));
+    const results = await Promise.all(
+      Array.from({ length: 5 }, (_, i) => post(request, "/api/v1/auth/complete-registration", { token, fullName: "Racer", password: `racing passphrase ${i} here` })),
+    );
+    const statuses = results.map((r) => r.status()).sort();
+    expect(statuses.filter((x) => x === 200)).toHaveLength(1);
+    expect(statuses.filter((x) => x === 400)).toHaveLength(4);
+  });
+
+  test("opening the link (as a mail scanner would) changes nothing", async ({ request, page, users }) => {
+    const email = uniqueEmail("scan");
+    users.track(email);
+    await registerViaUi(page, email);
+    const mail = await waitForMail(email, /Confirm your email/);
+    const before = await db().authToken.count({ where: { user: { email }, usedAt: null } });
+    const fetched = await request.get(mail.link("verify-email"));
+    expect(fetched.status()).toBe(200);
+    expect(await db().authToken.count({ where: { user: { email }, usedAt: null } })).toBe(before);
+    const u = await db().user.findUniqueOrThrow({ where: { email } });
+    expect(u.emailVerifiedAt).toBeNull();
+    expect(u.passwordHash).toBeNull();
+  });
+
+  test("the old verify-email API no longer exists", async ({ request }) => {
+    const res = await post(request, "/api/v1/auth/verify-email", { token: "a".repeat(43) });
+    expect(res.status()).toBe(404);
   });
 });
 
@@ -544,8 +642,8 @@ test.describe("account enumeration and brute force", () => {
     const owner = await users.create();
     const fresh = uniqueEmail("fresh");
     users.track(fresh);
-    const existing = await post(request, "/api/v1/auth/register", { email: owner.email, fullName: "Someone Else", password: PASSWORD });
-    const created = await post(request, "/api/v1/auth/register", { email: fresh, fullName: "New Person", password: PASSWORD });
+    const existing = await post(request, "/api/v1/auth/register", { email: owner.email });
+    const created = await post(request, "/api/v1/auth/register", { email: fresh });
     expect(existing.status()).toBe(202);
     expect(created.status()).toBe(202);
     expect(await existing.json()).toEqual(await created.json());
@@ -609,7 +707,7 @@ test.describe("account enumeration and brute force", () => {
     const email = uniqueEmail("flood");
     users.track(email);
     const reg: number[] = [];
-    for (let i = 0; i < 6; i++) reg.push((await post(request, "/api/v1/auth/register", { email, fullName: "Flood Person", password: PASSWORD })).status());
+    for (let i = 0; i < 6; i++) reg.push((await post(request, "/api/v1/auth/register", { email })).status());
     expect(reg).toEqual([202, 202, 202, 202, 202, 429]);
   });
 });
@@ -620,31 +718,32 @@ test.describe("password policy: minimum 12 characters", () => {
   const ELEVEN = "pq7-lmn-x2z";
   const TWELVE = "pq7-lmn-x2zk";
 
-  test("registration API rejects 11 characters on the password field and accepts 12", async ({ request, users }) => {
-    const rejected = await post(request, "/api/v1/auth/register", { email: uniqueEmail("p11"), fullName: "Policy Person", password: ELEVEN });
-    expect(rejected.status()).toBe(400);
-    const body = await rejected.json();
-    expect(body.error.issues).toEqual([{ path: ["password"], message: "Use at least 12 characters." }]);
-
+  test("the completion API rejects 11 characters on the password field and accepts 12", async ({ request, users }) => {
     const email = uniqueEmail("p12");
     users.track(email);
-    expect((await post(request, "/api/v1/auth/register", { email, fullName: "Policy Person", password: TWELVE })).status()).toBe(202);
+    expect((await post(request, "/api/v1/auth/register", { email })).status()).toBe(202);
+    const token = tokenFromMail(await waitForMail(email, /Confirm your email/));
+    const rejected = await post(request, "/api/v1/auth/complete-registration", { token, fullName: "Policy Person", password: ELEVEN });
+    expect(rejected.status()).toBe(400);
+    expect((await rejected.json()).error.issues).toEqual([{ path: ["password"], message: "Use at least 12 characters." }]);
+    expect((await post(request, "/api/v1/auth/complete-registration", { token, fullName: "Policy Person", password: TWELVE })).status()).toBe(200);
   });
 
-  test("registration form shows the 12-character rule from the server and then succeeds with 12", async ({ page, users }) => {
+  test("the completion form shows the 12-character rule from the server and then succeeds with 12", async ({ page, users }) => {
     const email = uniqueEmail("pform");
     users.track(email);
-    await page.goto("/register");
+    await registerViaUi(page, email);
+    const mail = await waitForMail(email, /Confirm your email/);
+    await page.goto(mail.link("verify-email"));
     await expect(page.getByText("At least 12 characters.")).toBeVisible(); // the hint matches the server rule
     await page.getByLabel(/^Full name/).fill("Policy Person");
-    await page.getByLabel(/^Email address/).fill(email);
     await page.getByLabel(/^Password/).fill(ELEVEN);
-    await page.getByRole("button", { name: "Create account" }).click();
+    await page.getByRole("button", { name: "Confirm email and activate account" }).click();
     await expect(page.getByLabel(/^Password/)).toHaveAttribute("aria-invalid", "true");
     await expect(page.getByText("Use at least 12 characters.")).toBeVisible();
     await page.getByLabel(/^Password/).fill(TWELVE);
-    await page.getByRole("button", { name: "Create account" }).click();
-    await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+    await page.getByRole("button", { name: "Confirm email and activate account" }).click();
+    await expect(page.getByRole("heading", { name: "Your account is ready" })).toBeVisible();
   });
 
   test("password reset enforces the same rule, checked before the token is consumed", async ({ request, page, users }) => {
@@ -700,8 +799,8 @@ test.describe("accessibility of account pages", () => {
       await expect(page.getByText("Enter your password.")).toBeVisible();
       await axeClean(page, "login with errors");
       await page.goto("/register");
-      await page.getByRole("button", { name: "Create account" }).click();
-      await expect(page.getByText("Enter your full name.")).toBeVisible();
+      await page.getByRole("button", { name: "Send confirmation link" }).click();
+      await expect(page.getByText("Enter your email address.", { exact: true })).toBeVisible();
       await axeClean(page, "register with errors");
 
       // signed in
@@ -746,7 +845,9 @@ test.describe("accessibility of account pages", () => {
     await expect(page.getByLabel(/^Email address/)).toHaveAttribute("autocomplete", "username");
     await expect(page.getByLabel(/^Password/)).toHaveAttribute("autocomplete", "current-password");
     await page.goto("/register");
-    await expect(page.getByLabel(/^Password/)).toHaveAttribute("autocomplete", "new-password");
     await expect(page.getByLabel(/^Email address/)).toHaveAttribute("autocomplete", "email");
+    await page.goto("/verify-email?token=" + "a".repeat(43));
+    await expect(page.getByLabel(/^Password/)).toHaveAttribute("autocomplete", "new-password");
+    await expect(page.getByLabel(/^Full name/)).toHaveAttribute("autocomplete", "name");
   });
 });

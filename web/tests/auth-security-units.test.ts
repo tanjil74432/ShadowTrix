@@ -6,7 +6,7 @@ import { cookieSettings } from "@/server/modules/auth/session-cookie";
 import { redact } from "@/server/logging/logger";
 import { safeNextPath } from "@/lib/safe-redirect";
 import { escapeHtml } from "@/server/modules/email/mailer";
-import { passwordResetEmail, verificationEmail } from "@/server/modules/email/templates";
+import { alreadyRegisteredEmail, passwordResetEmail, verificationEmail } from "@/server/modules/email/templates";
 
 const APP = "https://app.example.com";
 const req = (method: string, headers: Record<string, string> = {}) => new Request(`${APP}/api/x`, { method, headers });
@@ -157,14 +157,19 @@ describe("log redaction", () => {
 });
 
 describe("email templates", () => {
-  it("escape user-supplied names and never include a password", () => {
+  it("escape user-supplied names", () => {
     const evil = `<img src=x onerror=alert(1)>"&`;
-    const mail = verificationEmail("a@b.co", evil, "https://app.example.com/verify-email?token=abc", 24);
+    const mail = alreadyRegisteredEmail("a@b.co", evil, "https://app.example.com/login", "https://app.example.com/forgot-password");
     expect(mail.html).not.toContain("<img");
     expect(mail.html).toContain("&lt;img");
     expect(mail.subject).not.toMatch(/[<>]/);
-    expect(mail.text + mail.html).not.toMatch(/password:/i);
     expect(escapeHtml(`<>&"'`)).toBe("&lt;&gt;&amp;&quot;&#39;");
+  });
+  it("the confirmation email names no person, mentions no password and states the expiry", () => {
+    const mail = verificationEmail("a@b.co", "https://app.example.com/verify-email?token=abc", 24);
+    expect(mail.text).toContain("https://app.example.com/verify-email?token=abc");
+    expect(mail.text).toContain("24 hours");
+    expect(mail.text + mail.html).not.toMatch(/password:/i);
   });
   it("link only to the supplied URL and state expiry", () => {
     const mail = passwordResetEmail("a@b.co", "Ada", "https://app.example.com/reset-password?token=abc", 60);

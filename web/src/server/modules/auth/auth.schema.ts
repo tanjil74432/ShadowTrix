@@ -46,12 +46,14 @@ const fullName = z
 
 const token = z.string().trim().min(20, "This link is not valid.").max(200, "This link is not valid.");
 
-export const registerSchema = z
-  .object({ email, fullName, password: newPassword })
-  .superRefine((v, ctx) => {
-    const issue = passwordIssues(v.password, v.email);
-    if (issue) ctx.addIssue({ code: "custom", path: ["password"], message: issue });
-  });
+/** Step 1 of signup: only an email address. No name and no password are accepted until the mailbox is proven. */
+export const registerSchema = z.object({ email });
+
+/** Step 2: the owner of the mailbox, holding the emailed token, chooses a name and password. */
+export const completeRegistrationSchema = z.object({ token, fullName, password: newPassword }).superRefine((v, ctx) => {
+  const issue = passwordIssues(v.password);
+  if (issue) ctx.addIssue({ code: "custom", path: ["password"], message: issue });
+});
 
 // Login never reveals password rules; only that something is required.
 export const loginSchema = z.object({
@@ -67,4 +69,5 @@ export const resetPasswordSchema = z.object({ token, password: newPassword }).su
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;
+export type CompleteRegistrationInput = z.infer<typeof completeRegistrationSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;

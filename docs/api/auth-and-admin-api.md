@@ -29,8 +29,8 @@ Validation errors add `issues: [{ "path": ["password"], "message": "Use at least
 
 | Method and path | Body | Success | Notes |
 |---|---|---|---|
-| `POST /auth/register` | `{ email, fullName, password }` | `202 { status, message }` | Same response for new, unverified and existing addresses. Password: 12 to 128 characters, not common, not containing the email name. |
-| `POST /auth/verify-email` | `{ token }` | `200 { status: "ok" }` | Token is single use and valid 24 hours. |
+| `POST /auth/register` | `{ email }` | `202 { status, message }` | Step 1. Same response for new, pending and existing addresses. Extra fields (such as a password or name) are ignored and never stored. |
+| `POST /auth/complete-registration` | `{ token, fullName, password }` | `200 { status: "ok" }` | Step 2. Token is single use and valid 24 hours; it is consumed only if the password is accepted. Password: 12 to 128 characters, not common, not containing the email name (400 `validation_error` on field `password`). 400 `invalid_token` for unknown, used, expired or wrong-type tokens. Replaces the former `POST /auth/verify-email`, which no longer exists. |
 | `POST /auth/resend-verification` | `{ email }` | `202` | Same response for every address. |
 | `POST /auth/login` | `{ email, password }` | `200 { user: { id, email, fullName } }` + `Set-Cookie` | The session token is only in the cookie, never in the body. 403 `email_not_verified` / `account_suspended` appear only after a correct password. |
 | `POST /auth/logout` | none (send `{}`) | `200` | Revokes the session; always clears the cookie. |
