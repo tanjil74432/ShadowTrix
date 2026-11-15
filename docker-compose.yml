@@ -1,0 +1,31 @@
+# Local development services only. Not a production deployment file.
+# Credentials below are development defaults; override via environment variables.
+name: shadowtrix
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-shadowtrix}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shadowtrix_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-shadowtrix}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - shadowtrix_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+
+volumes:
+  shadowtrix_pgdata:
