@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/server/db/client";
 import { registerSchema } from "@/server/modules/auth/auth.schema";
 import {
@@ -10,11 +10,18 @@ import {
   resetPassword,
   verifyEmail,
 } from "@/server/modules/auth/auth.service";
-import { hashPassword, verifyPassword } from "@/server/modules/auth/password";
+import { burnPasswordVerification, hashPassword, verifyPassword } from "@/server/modules/auth/password";
 import { createSession, getSessionUser, purgeDeadSessions, revokeAllUserSessions } from "@/server/modules/auth/session.service";
 import { RateLimitedError, consumeRateLimit } from "@/server/security/rate-limit";
 import { hashToken } from "@/server/security/tokens";
 import { NEW_PW, PW, cleanup, createUser, ctx, makeHarness, tokenFrom, uniqueEmail } from "./helpers/auth-harness";
+
+// Wrap (not replace) the two password functions so tests can assert WHEN the expensive work happens.
+// Behavioural assertions replace wall-clock thresholds, which depend on how fast the machine is.
+vi.mock("@/server/modules/auth/password", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/server/modules/auth/password")>();
+  return { ...real, hashPassword: vi.fn(real.hashPassword), burnPasswordVerification: vi.fn(real.burnPasswordVerification) };
+});
 
 const DAY = 86_400_000;
 const reg = (email: string, password = PW, fullName = "Ada Lovelace") => registerSchema.parse({ email, fullName, password });
@@ -53,17 +60,17 @@ describe("registration", () => {
     const h = makeHarness();
     const owner = await createUser();
     const before = await getDb().user.count();
-    const start = performance.now();
+    vi.mocked(hashPassword).mockClear();
     await expect(registerUser(reg(owner.email, "an attacker chosen passphrase"), ctx, h.deps)).resolves.toBeUndefined();
-    const elapsed = performance.now() - start;
     await h.flush();
 
     expect(await getDb().user.count()).toBe(before); // no new account
     expect(await verifyPassword((await getDb().user.findUniqueOrThrow({ where: { id: owner.id } })).passwordHash, PW)).toBe(true); // password untouched
     expect(h.mailsTo(owner.email).map((m) => m.subject)).toEqual(["You already have a ShadowTrix account"]);
     expect(await getDb().authToken.count({ where: { userId: owner.id } })).toBe(0);
-    // The password is hashed on every path, so this path is not measurably faster than a new registration.
-    expect(elapsed).toBeGreaterThan(60);
+    // The password is hashed on every path (including this "already registered" one), so the response time
+    // does not reveal that the address exists.
+    expect(vi.mocked(hashPassword)).toHaveBeenCalledTimes(1);
   });
 
   it("lets a newer registration replace an unverified one (so nobody can squat an address) and voids the old link", async () => {
@@ -214,9 +221,12 @@ describe("login", () => {
       await login({ email, password: "wrong password here" }, ctx, h.deps).catch(() => {});
       return performance.now() - s;
     };
+    vi.mocked(burnPasswordVerification).mockClear();
     const known = await time(u.email);
+    expect(vi.mocked(burnPasswordVerification)).not.toHaveBeenCalled(); // a real verification already ran
     const ghost = await time(uniqueEmail("ghost"));
-    expect(ghost).toBeGreaterThan(50); // real Argon2 work happened for an unknown address
+    expect(vi.mocked(burnPasswordVerification)).toHaveBeenCalledTimes(1); // an unknown address pays for one too
+    // and the two paths take comparable time (relative check, so it holds on fast and slow machines alike)
     expect(Math.abs(known - ghost)).toBeLessThan(Math.max(known, ghost) * 0.7);
   });
 

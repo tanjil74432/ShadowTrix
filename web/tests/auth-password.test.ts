@@ -33,13 +33,19 @@ describe("password hashing (Argon2id)", () => {
   });
 
   it("burnPasswordVerification does real work without throwing (timing equalization for unknown users)", async () => {
-    const start = performance.now();
+    // Compare against a real verification measured on this same machine, so the check holds on fast and slow hardware.
+    const real = await hashPassword("a real stored password");
+    await verifyPassword(real, "warm-up");
+    const t0 = performance.now();
+    await verifyPassword(real, "wrong guess");
+    const realVerify = performance.now() - t0;
+
+    await burnPasswordVerification("warm-up"); // the first call also creates the dummy hash
+    const t1 = performance.now();
     await burnPasswordVerification("whatever");
-    // first call also creates the dummy hash; later calls still verify (>= tens of ms with 64 MiB Argon2)
-    const second = performance.now();
-    await burnPasswordVerification("whatever");
-    expect(performance.now() - second).toBeGreaterThan(20);
-    expect(second - start).toBeGreaterThan(20);
+    const burn = performance.now() - t1;
+    expect(burn).toBeGreaterThan(realVerify * 0.4); // same order of cost as a genuine verification
+    expect(burn).toBeLessThan(realVerify * 5);
   });
 });
 
