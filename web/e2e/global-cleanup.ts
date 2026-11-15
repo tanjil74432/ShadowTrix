@@ -13,8 +13,13 @@ export default async function globalCleanup() {
     select: { id: true },
   });
   const ids = doomed.map((u) => u.id);
+  const eventIds = ids.length ? (await client.event.findMany({ where: { createdById: { in: ids } }, select: { id: true } })).map((e) => e.id) : [];
+  if (eventIds.length) {
+    await client.auditLog.deleteMany({ where: { entityId: { in: eventIds } } });
+    await client.event.deleteMany({ where: { id: { in: eventIds } } });
+  }
   if (ids.length) {
-    await client.auditLog.deleteMany({ where: { entityId: { in: ids } } });
+    await client.auditLog.deleteMany({ where: { OR: [{ actorId: { in: ids } }, { entityId: { in: ids } }] } });
     await client.user.deleteMany({ where: { id: { in: ids } } });
   }
   await client.rateLimit.deleteMany({});

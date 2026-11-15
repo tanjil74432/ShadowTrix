@@ -263,6 +263,45 @@ export async function logout(sessionToken: string | undefined, actorId?: string)
   if (actorId) await writeAudit({ actorId, action: "auth.logout", entityType: "user", entityId: actorId });
 }
 
+// ───────────────────────────── Change password (signed in) ─────────────────────────────
+
+/**
+ * Changes the password of a signed-in user. Requires the current password (a stolen session alone is not enough),
+ * applies the same policy as signup and reset, signs the account out EVERYWHERE and mints a fresh session for this
+ * browser (rotation), then emails a notice. The new session token is returned so the route can set the cookie.
+ */
+export async function changePassword(
+  input: { userId: string; currentPassword: string; newPassword: string },
+  ctx: RequestContext,
+  deps: AuthDeps = defaultDeps(),
+): Promise<{ sessionToken: string; expiresAt: Date }> {
+  await enforceRateLimits([{ scope: "change-password:user", id: input.userId, policy: POLICIES.changePasswordUser }], deps.now());
+  const db = getDb();
+  const user = await db.user.findUnique({ where: { id: input.userId } });
+  if (!user || user.status !== "ACTIVE" || !user.passwordHash) throw new AppError(401, "unauthorized", "Authentication required");
+  if (!(await verifyPassword(user.passwordHash, input.currentPassword))) {
+    throw new AppError(400, "invalid_current_password", "Your current password is not correct.");
+  }
+  const issue = passwordIssues(input.newPassword, user.email);
+  if (issue) throw new ZodError([{ code: "custom", path: ["newPassword"], message: issue, input: undefined }]);
+  if (await verifyPassword(user.passwordHash, input.newPassword)) {
+    throw new ZodError([{ code: "custom", path: ["newPassword"], message: "Choose a password different from your current one.", input: undefined }]);
+  }
+
+  const newHash = await hashPassword(input.newPassword);
+  const now = deps.now();
+  const session = await db.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: user.id }, data: { passwordHash: newHash } });
+    await tx.authToken.updateMany({ where: { userId: user.id, usedAt: null, type: "PASSWORD_RESET" }, data: { usedAt: now } });
+    const revoked = await revokeAllUserSessions(user.id, "password_changed", tx);
+    const fresh = await createSession(user.id, { userAgent: ctx.userAgent }, now, deps.sessionLimits, tx);
+    await writeAudit({ actorId: user.id, action: "auth.password_changed", entityType: "user", entityId: user.id, after: { sessionsRevoked: revoked } }, tx);
+    return fresh;
+  });
+  queueMail(deps, passwordChangedEmail(user.email, user.fullName, linkTo("/forgot-password")));
+  return { sessionToken: session.token, expiresAt: session.expiresAt };
+}
+
 // ───────────────────────────── Password reset ─────────────────────────────
 
 /** Always succeeds from the caller's point of view; never reveals whether the address has an account. */

@@ -81,6 +81,12 @@ export async function cleanup() {
     select: { id: true },
   });
   const ids = doomed.map((u) => u.id);
+  // Events the test users created go first (their registrations and organizer rows cascade), with their audit rows.
+  const eventIds = ids.length ? (await db.event.findMany({ where: { createdById: { in: ids } }, select: { id: true } })).map((e) => e.id) : [];
+  if (eventIds.length) {
+    await db.auditLog.deleteMany({ where: { entityId: { in: eventIds } } });
+    await db.event.deleteMany({ where: { id: { in: eventIds } } });
+  }
   if (ids.length) {
     await db.auditLog.deleteMany({ where: { OR: [{ actorId: { in: ids } }, { entityId: { in: ids } }] } });
     await db.user.deleteMany({ where: { id: { in: ids } } });

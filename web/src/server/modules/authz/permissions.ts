@@ -69,3 +69,20 @@ export function hasGlobalRole(actor: Actor | null | undefined, role: Role): bool
 
 /** Roles that can be assigned directly. TEAM_LEADER is derived from team membership, never granted by hand. */
 export const ASSIGNABLE_ROLES: readonly Role[] = ["PARTICIPANT", "ORGANIZER", "JUDGE", "ADMIN"];
+
+/**
+ * Who may edit, publish or see the participants of ONE event. Holding the ORGANIZER role is not enough: an
+ * organizer manages only events they organize, so one organizer cannot touch another's event. Administrators
+ * manage every event; an event-scoped ORGANIZER grant covers exactly that event.
+ */
+export function canManageEvent(actor: Actor | null | undefined, eventId: string, organizerIds: readonly string[]): boolean {
+  if (!actor) return false;
+  if (hasGlobalRole(actor, "ADMIN")) return true;
+  if (can(actor, "event:manage", { eventId }) && actor.roles.some((g) => g.eventId === eventId && g.role === "ORGANIZER")) return true;
+  return hasGlobalRole(actor, "ORGANIZER") && organizerIds.includes(actor.id);
+}
+
+/** Who may create events at all: administrators and platform-wide organizers (an event-scoped grant cannot create new events). */
+export function canCreateEvents(actor: Actor | null | undefined): boolean {
+  return hasGlobalRole(actor, "ADMIN") || hasGlobalRole(actor, "ORGANIZER");
+}

@@ -331,6 +331,7 @@ model Event {
 
   @@index([status, startsAt])
   @@index([category])
+  @@index([status, category, startsAt], map: "events_status_category_starts_idx")
   @@map("events")
 }
 
@@ -355,6 +356,7 @@ model EventOrganizer {
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([eventId, userId])
+  @@index([userId], map: "event_organizers_user_idx")
   @@map("event_organizers")
 }
 
@@ -461,6 +463,7 @@ model Registration {
 
   @@unique([eventId, userId])
   @@index([eventId, status])
+  @@index([eventId, status, registeredAt], map: "registrations_event_status_registered_idx")
   @@index([userId])
   @@map("registrations")
 }

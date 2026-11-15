@@ -6,13 +6,15 @@ export interface ApiResult {
   message?: string;
   fieldErrors: Record<string, string>;
   retryAfterSeconds?: number;
+  /** Parsed JSON body of a successful response, when there is one. */
+  data?: unknown;
 }
 
 interface ErrorBody {
   error?: { code?: string; message?: string; issues?: { path: (string | number)[]; message: string }[] };
 }
 
-export async function sendJson(url: string, body?: unknown, method: "POST" | "DELETE" = "POST"): Promise<ApiResult> {
+export async function sendJson(url: string, body?: unknown, method: "POST" | "DELETE" | "PATCH" = "POST"): Promise<ApiResult> {
   let res: Response;
   try {
     res = await fetch(url, {
@@ -24,7 +26,10 @@ export async function sendJson(url: string, body?: unknown, method: "POST" | "DE
   } catch {
     return { ok: false, status: 0, code: "network_error", message: "We could not reach the server. Check your connection and try again.", fieldErrors: {} };
   }
-  if (res.ok) return { ok: true, status: res.status, fieldErrors: {} };
+  if (res.ok) {
+    const data: unknown = await res.json().catch(() => undefined);
+    return { ok: true, status: res.status, fieldErrors: {}, data };
+  }
 
   let data: ErrorBody = {};
   try {

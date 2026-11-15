@@ -61,6 +61,14 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Enter your password.").max(PASSWORD_MAX),
 });
 
+/** Signed-in password change: the current password proves the person at the keyboard is the account owner. */
+export const changePasswordSchema = z
+  .object({ currentPassword: z.string().min(1, "Enter your current password.").max(PASSWORD_MAX), newPassword })
+  .superRefine((v, ctx) => {
+    const issue = passwordIssues(v.newPassword);
+    if (issue) ctx.addIssue({ code: "custom", path: ["newPassword"], message: issue });
+  });
+
 export const emailOnlySchema = z.object({ email });
 export const tokenSchema = z.object({ token });
 export const resetPasswordSchema = z.object({ token, password: newPassword }).superRefine((v, ctx) => {

@@ -1,21 +1,25 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { connection } from "next/server";
 import { Suspense } from "react";
-import { LogoutButton } from "@/components/auth/logout-button";
+import { AreaNav } from "@/components/dashboard/area-nav";
+import { RegistrationRow } from "@/components/dashboard/registration-row";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Container } from "@/components/ui/container";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatDateTime } from "@/lib/format";
 import { ROLE_LABEL } from "@/lib/roles";
 import { requireUser } from "@/server/modules/auth/dal";
-import { can } from "@/server/modules/authz/permissions";
+import { listMyRegistrations } from "@/server/modules/events/registrations.service";
 
-export const metadata: Metadata = { title: "Dashboard", robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: "My dashboard", robots: { index: false, follow: false } };
 
 export default function DashboardPage() {
   return (
     <Container className="py-14 sm:py-20">
-      <Suspense fallback={<Skeleton className="h-64 w-full" />}>
+      <Suspense fallback={<Skeleton className="h-96 w-full" />}>
         <DashboardContent />
       </Suspense>
     </Container>
@@ -24,50 +28,101 @@ export default function DashboardPage() {
 
 async function DashboardContent() {
   const user = await requireUser("/dashboard");
+  await connection();
+  const now = new Date();
+  const mine = await listMyRegistrations(user.id);
+  const active = mine.filter((r) => r.status !== "CANCELLED");
+  const upcoming = active.filter((r) => r.event.endsAt > now && r.event.status !== "CANCELLED").sort((a, b) => a.event.startsAt.getTime() - b.event.startsAt.getTime());
+  const past = active.filter((r) => r.event.endsAt <= now || r.event.status === "CANCELLED");
+  const cancelled = mine.filter((r) => r.status === "CANCELLED");
+
+  // Deadlines the person can act on: the next dates of events they are registered for.
+  const deadlines = upcoming
+    .flatMap((r) => [
+      { at: r.event.registrationClosesAt, label: "Registration closes", event: r.event },
+      { at: r.event.startsAt, label: "Event starts", event: r.event },
+      ...(r.event.submissionDeadline ? [{ at: r.event.submissionDeadline, label: "Submission deadline", event: r.event }] : []),
+    ])
+    .filter((d) => d.at > now)
+    .sort((a, b) => a.at.getTime() - b.at.getTime())
+    .slice(0, 5);
+
   const roles = [...new Set(user.roles.map((r) => r.role))];
-  const areas = [
-    { href: "/organizer", label: "Organizer area", show: can(user, "event:manage") },
-    { href: "/judge", label: "Judge area", show: can(user, "event:judge") },
-    { href: "/admin", label: "Administration", show: can(user, "admin:access") },
-  ].filter((a) => a.show);
 
   return (
     <>
+      <AreaNav user={user} current="overview" />
       <p className="text-sm font-medium text-fg-muted">Signed in</p>
       <h1 className="mt-2 text-h1 font-semibold text-balance">Welcome, {user.fullName}</h1>
+      <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+        <span className="break-all">{user.email}</span>
+        {roles.map((r) => (
+          <Badge key={r} className="text-fg">
+            {ROLE_LABEL[r] ?? r}
+          </Badge>
+        ))}
+      </div>
 
-      <dl className="mt-10 grid max-w-2xl gap-6 rounded-lg bg-surface p-6 shadow-card sm:grid-cols-2">
-        <div>
-          <dt className="text-sm text-fg-subtle">Email address</dt>
-          <dd className="mt-1 font-medium break-all">{user.email}</dd>
-        </div>
-        <div>
-          <dt className="text-sm text-fg-subtle">Roles</dt>
-          <dd className="mt-1 flex flex-wrap gap-2">
-            {roles.map((r) => (
-              <Badge key={r} className="text-fg">
-                {ROLE_LABEL[r] ?? r}
-              </Badge>
-            ))}
-          </dd>
-        </div>
+      <dl className="mt-10 grid gap-4 sm:grid-cols-3">
+        {[
+          ["Upcoming events", upcoming.length],
+          ["Past events", past.length],
+          ["Cancelled", cancelled.length],
+        ].map(([label, n]) => (
+          <div key={label as string} className="rounded-lg bg-surface p-5 shadow-card">
+            <dt className="text-sm text-fg-subtle">{label}</dt>
+            <dd className="mt-1 text-h2 font-semibold">{n}</dd>
+          </div>
+        ))}
       </dl>
 
-      {areas.length > 0 && (
-        <nav aria-label="Your areas" className="mt-8 flex flex-wrap gap-3">
-          {areas.map((a) => (
-            <Button key={a.href} asChild variant="secondary">
-              <Link href={a.href}>{a.label}</Link>
-            </Button>
-          ))}
-        </nav>
-      )}
+      <div className="mt-12 grid gap-12 lg:grid-cols-[1fr_20rem]">
+        <section aria-labelledby="registered-heading">
+          <h2 id="registered-heading" className="text-h2 font-semibold">My registered events</h2>
+          {active.length === 0 ? (
+            <EmptyState
+              className="mt-6"
+              title="You have not registered for any event yet"
+              description="Browse the published events and reserve your place."
+              action={<Button asChild><Link href="/events">Browse events</Link></Button>}
+            />
+          ) : (
+            <ul className="mt-6 space-y-3">
+              {[...upcoming, ...past].map((r) => (
+                <RegistrationRow key={r.id} registration={r} now={now} />
+              ))}
+            </ul>
+          )}
+          {cancelled.length > 0 && (
+            <details className="mt-8">
+              <summary className="cursor-pointer text-sm font-medium text-fg-muted">Cancelled registrations ({cancelled.length})</summary>
+              <ul className="mt-4 space-y-3">
+                {cancelled.map((r) => (
+                  <RegistrationRow key={r.id} registration={r} now={now} />
+                ))}
+              </ul>
+            </details>
+          )}
+        </section>
 
-      <p className="mt-10 max-w-2xl text-fg-muted text-pretty">
-        Event registration, teams and submissions will appear here as they are released. For now this page confirms that your account and roles are working.
-      </p>
-      <div className="mt-8">
-        <LogoutButton />
+        <section aria-labelledby="deadlines-heading">
+          <h2 id="deadlines-heading" className="text-h3 font-semibold">Upcoming deadlines</h2>
+          {deadlines.length === 0 ? (
+            <p className="mt-4 text-fg-muted">Nothing coming up. Deadlines of events you registered for appear here.</p>
+          ) : (
+            <ol className="mt-4 space-y-4">
+              {deadlines.map((d, i) => (
+                <li key={`${d.event.id}-${i}`} className="border-l border-border-strong pl-4">
+                  <p className="text-sm text-fg-subtle">{d.label}</p>
+                  <p className="font-medium">
+                    <Link href={`/events/${d.event.slug}`} className="underline underline-offset-4">{d.event.title}</Link>
+                  </p>
+                  <time className="text-sm text-fg-muted" dateTime={d.at.toISOString()}>{formatDateTime(d.at, d.event.timezone)}</time>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
       </div>
     </>
   );

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Suspense } from "react";
 import { Container } from "@/components/ui/container";
 import { nav } from "@/lib/site";
@@ -20,26 +21,37 @@ export function Navbar() {
         <BrandLogo />
 
         <nav aria-label="Primary" className="hidden items-center gap-1 md:flex">
-          <NavLink href={events.href}>{events.label}</NavLink>
-          <AboutMenu />
-          {rest.map((l) => (
-            <NavLink key={l.href} href={l.href}>
-              {l.label}
-            </NavLink>
-          ))}
+          {/* usePathname() is runtime data on dynamic routes such as /events/[slug], so the active-link logic streams in. */}
+          <Suspense
+            fallback={nav.primary.map((l) => (
+              <Link key={l.href} href={l.href} className="rounded-md px-3 py-2 text-sm font-medium text-fg-muted hover:text-fg">
+                {l.label}
+              </Link>
+            ))}
+          >
+            <NavLink href={events.href}>{events.label}</NavLink>
+            <AboutMenu />
+            {rest.map((l) => (
+              <NavLink key={l.href} href={l.href}>
+                {l.label}
+              </NavLink>
+            ))}
+          </Suspense>
         </nav>
 
         <div className="flex items-center gap-2">
           <Suspense fallback={<div aria-hidden className="h-9 w-24 md:w-40" />}>
             <AccountActions />
           </Suspense>
-          <MobileMenu
-            account={
-              <Suspense fallback={null}>
-                <MobileAccountActions />
-              </Suspense>
-            }
-          />
+          <Suspense fallback={<div aria-hidden className="size-10 md:hidden" />}>
+            <MobileMenu
+              account={
+                <Suspense fallback={null}>
+                  <MobileAccountActions />
+                </Suspense>
+              }
+            />
+          </Suspense>
         </div>
       </Container>
     </header>

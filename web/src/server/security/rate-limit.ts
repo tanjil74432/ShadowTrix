@@ -84,4 +84,5 @@ export const POLICIES = {
   resendEmail: { limit: 5, windowSeconds: 60 * 60 },
   resendIp: { limit: 20, windowSeconds: 60 * 60 },
   tokenSubmitIp: { limit: 20, windowSeconds: 15 * 60 },
+  changePasswordUser: { limit: 5, windowSeconds: 15 * 60 },
 } satisfies Record<string, RateLimitPolicy>;
