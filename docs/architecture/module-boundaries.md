@@ -31,8 +31,10 @@ Rules (the first is enforced by ESLint, the rest by review):
 | Module | Owns tables | Depends on | Milestone |
 |---|---|---|---|
 | health | none | db | 2 (done) |
-| auth | users (credentials), auth_tokens | email, audit | 4 |
-| users | users (profile), user_roles | auth, audit | 4 |
+| auth | users (credentials), auth_tokens, sessions | email, audit, security | 4 (done) |
+| authz | none (pure permission matrix) | none | 4 (done) |
+| admin (user management) | user_roles (writes), users.status | auth, authz, audit | 4 (done); UI in 9 |
+| users | users (profile) | auth, audit | later |
 | events | events, event_schedule_items, event_hosts, event_organizers | users, organizations, audit | 5 |
 | organizations | organizations | audit | 5 |
 | registrations | registrations | events, users, teams | 5 |
@@ -43,23 +45,26 @@ Rules (the first is enforced by ESLint, the rest by review):
 | results | results (leaderboard) | judging | 8 |
 | certificates | certificates | results, registrations, storage | 8 |
 | leadership | org_units, designations, org_terms, org_members, org_memberships, org_member_contributions | storage, audit | 6a |
-| admin | site_settings, audit_logs (read) | all (read), audit | 9 |
-| email, storage, audit | (infrastructure) audit_logs write | env | introduced when first needed |
+| admin (dashboard, analytics) | site_settings, audit_logs (read) | all (read), audit | 9 |
+| email, audit | (infrastructure) audit_logs write | env | 4 (done) |
+| security (rate limit, CSRF, tokens, client IP) | rate_limits | env, db | 4 (done) |
+| storage | (infrastructure) | env | 7 |
 
 ## API conventions
 
 - REST + JSON under `/api/v1/<resource>`; operational endpoints (`/api/health`) are unversioned.
 - Errors: `{ "error": { "code": string, "message": string, "issues"?: [...] } }` with status 400 (validation), 401, 403, 404, 409, 429, 500. Internal details are never returned.
-- Auth: httpOnly session cookie; state-changing requests also require a CSRF check (Milestone 4).
+- Auth: HttpOnly session cookie. Every state-changing request is checked centrally in `apiHandler` (Origin / Sec-Fetch-Site must be same-origin; JSON content type for bodies), and every handler declares its permission with `requireApiUser` / `requireApiPermission`. Details: [authentication.md](authentication.md).
 - Pagination: `?page=&pageSize=` with a capped `pageSize`; list responses include `total`.
 - Dates are ISO 8601 UTC strings; events also carry an IANA `timezone` for display.
 - OpenAPI: generated from the Zod schemas (decision deferred to Milestone 5 when the first real resource lands); documents go in `docs/api/`.
 
-## Planned endpoint surface (contract draft, not yet implemented)
+## Planned endpoint surface (contract draft)
+
+Authentication and administration endpoints are implemented and documented in [../api/auth-and-admin-api.md](../api/auth-and-admin-api.md) (there is no `/auth/refresh`: sessions are server-side). The rows below are still plans.
 
 | Area | Endpoints |
 |---|---|
-| Auth | `POST /auth/register`, `/auth/login`, `/auth/logout`, `/auth/refresh`, `/auth/verify-email`, `/auth/forgot-password`, `/auth/reset-password`, `GET /auth/me` |
 | Events (public) | `GET /events` (filters: category, status, q, date), `GET /events/{slug}`, `GET /events/{slug}/schedule`, `GET /events/{slug}/leaderboard` |
 | Events (organizer) | `POST /events`, `PATCH /events/{id}`, `POST /events/{id}/publish`, `/registration/open`, `/registration/close`, participants list/export, announcements, submissions list |
 | Registration | `POST /events/{id}/registrations`, `DELETE /registrations/{id}`, `GET /me/registrations` |

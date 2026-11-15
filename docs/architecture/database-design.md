@@ -6,7 +6,7 @@ Conventions: UUIDv7 ids; `created_at`/`updated_at` as `timestamptz`; snake_case 
 
 ## Tables by module
 
-**Identity & access:** `users`, `user_roles` (role grants, optionally scoped to an event or organization), `auth_tokens` (SHA-256 hashes of verification / reset / refresh tokens, never raw tokens), `audit_logs`, `site_settings`.
+**Identity & access:** `users`, `user_roles` (role grants, optionally scoped to an event or organization), `auth_tokens` (SHA-256 hashes of verification / reset tokens, never raw tokens), `sessions` (server-side login sessions, keyed by the SHA-256 of the cookie token), `rate_limits` (fixed-window counters, HMAC keys), `audit_logs`, `site_settings`.
 
 **Organizations (hosts):** `organizations` (one row flagged `is_operator` = Team EU Shadow), `event_hosts` (HOST / CO_HOST / PARTNER). Prepares for external universities and communities without tenancy.
 
@@ -38,6 +38,8 @@ Conventions: UUIDv7 ids; `created_at`/`updated_at` as `timestamptz`; snake_case 
 | Auditability | Admin/organizer actions | `audit_logs` with before/after JSON |
 
 ## Change log
+
+- **v1.2 (Milestone 4):** added `sessions` and `rate_limits`. Constraints: `sessions_expiry_chk` (expiry after creation), `rate_limits_count_chk`, `auth_tokens_expiry_chk`, and the partial unique index `auth_tokens_one_live_per_type_idx` (a user has at most one unused email-verification token and one unused password-reset token, so issuing a new link necessarily voids the old one). Sessions cascade-delete with their user. No IP addresses are stored: sessions keep a truncated user agent only, and rate-limit keys are HMACs. The Prisma client is now generated as CommonJS (needed by the Playwright test loader).
 
 - **v1.1 (Milestone 3):** added `events.judging_starts_at`, `judging_ends_at` and `results_announcement_at` (planned result date; `results_published_at` remains the actual publication time) so every event can show its five distinct phases: registration, event, submission, judging, results. Added ordering CHECK constraints (judging after submission deadline, results after judging) with tests. Declared the `org_members_public_idx` index in the Prisma schema so migrations no longer try to drop it.
 

@@ -16,7 +16,8 @@
     "db:studio": "prisma studio",
     "logo:build": "node ../scripts/build-logo-assets.mjs",
     "postinstall": "prisma generate",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "admin:grant": "tsx prisma/grant-admin.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",

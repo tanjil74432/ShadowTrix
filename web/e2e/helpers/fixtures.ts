@@ -129,7 +129,11 @@ export const test = base.extend<{ users: { create: typeof createUser; track: (em
       track: (email) => void extraEmails.push(email.toLowerCase()),
     });
     const emails = [...list.map((u) => u.email), ...extraEmails];
-    await db().user.deleteMany({ where: { OR: [{ id: { in: list.map((u) => u.id) } }, { email: { in: emails } }] } });
+    const where = { OR: [{ id: { in: list.map((u) => u.id) } }, { email: { in: emails } }] };
+    // Remove audit rows first: once the user is gone their actor reference is nulled and they could no longer be found.
+    const ids = (await db().user.findMany({ where, select: { id: true } })).map((u) => u.id);
+    await db().auditLog.deleteMany({ where: { OR: [{ actorId: { in: ids } }, { entityId: { in: ids } }] } });
+    await db().user.deleteMany({ where });
   },
 });
 

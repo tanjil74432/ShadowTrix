@@ -69,12 +69,21 @@ export const actorOf = (u: { id: string; roles: { role: Actor["roles"][number]["
   roles: u.roles.map((r) => ({ role: r.role, eventId: r.eventId ?? null, organizationId: r.organizationId ?? null })),
 });
 
-/** Remove everything the test created (cascades to sessions, tokens and roles) and the rate-limit counters. */
+/**
+ * Remove everything the tests created: users (cascading to sessions, tokens and roles), their audit rows and the
+ * rate-limit counters. Audit rows are deleted first, while they can still be found through their user ids.
+ */
 export async function cleanup() {
   const db = getDb();
-  if (created.length) {
-    await db.user.deleteMany({ where: { id: { in: created.splice(0) } } });
+  const mine = created.splice(0);
+  const doomed = await db.user.findMany({
+    where: { OR: [{ id: { in: mine } }, { email: { startsWith: "vt-" } }] },
+    select: { id: true },
+  });
+  const ids = doomed.map((u) => u.id);
+  if (ids.length) {
+    await db.auditLog.deleteMany({ where: { OR: [{ actorId: { in: ids } }, { entityId: { in: ids } }] } });
+    await db.user.deleteMany({ where: { id: { in: ids } } });
   }
-  await db.user.deleteMany({ where: { email: { startsWith: "vt-" } } });
   await purgeExpiredRateLimits(0);
 }

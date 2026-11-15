@@ -60,3 +60,27 @@ Each Forkship audit finding is mapped to an implementation and a test in [refere
 
 ## 11. Recommended next milestone
 Milestone 4: authentication (register, login and logout, email verification, password reset, role-based access), which will turn the Login and Register placeholder pages into real pages using the form components built here. Before that, review this branch's pull request into `develop`, and consider a manual screen-reader pass on the homepage.
+
+---
+
+## Integration addendum (combined work package 01)
+
+Milestone 3 was re-inspected against the real repository state before Milestone 4 began. Nothing in the earlier report was assumed to still be true.
+
+**Findings and fixes**
+
+| # | Finding | Cause | Fix |
+|---|---|---|---|
+| 1 | GitHub CI had never passed. The first run on `main` failed at **Typecheck**. | `LayoutProps` is a global type that Next.js generates into `.next/types`. Developer machines have it after any build; a fresh checkout does not. | `typecheck` now runs `next typegen` first. Reproduced and verified in a fresh clone. |
+| 2 | `npm install` failed on a fresh clone without a `.env`. | `prisma.config.ts` demanded `DATABASE_URL` even for `prisma generate`, which never connects. | Generate works without it; every database command still fails loudly without it. |
+| 3 | CI only ran on `main` and pull requests, so feature branches got no feedback. | Workflow trigger. | Also runs on pushes to `develop` and `feature/**`. |
+| 4 | After fixes 1 to 3, CI failed only at the end-to-end step, and logs need authentication to read. | Unknown at the time. | Playwright's `github` reporter now writes failures as annotations, readable through the public API. |
+| 5 | The annotation showed exactly one failing test (23 of 24 passed): the image-loading check. | The test sampled image state once, before the lazy-loaded footer logo finished loading. A test race, not a product defect. | The test now polls until all images have loaded. |
+
+**Result:** CI is green on GitHub for `feature/milestone-3-design-system` (run on commit `b814299`).
+
+**Database migration audit:** the three migrations apply cleanly to a fresh database; `prisma migrate diff` reports no drift; all 16 CHECK constraints, 1 trigger and 7 hand-written indexes from Milestones 2 and 3 are present and covered by tests. History note: while generating the Milestone 3 migration, Prisma proposed dropping the hand-written `org_members_public_idx`; that was fixed by declaring the index in the schema, and the dev database's recorded checksum was corrected without bypassing Prisma's reset protection (see the Milestone 3 caveats above). No migration history has been rewritten since.
+
+**Not yet verified:** Firefox, Safari and real devices; a manual screen-reader pass; Lighthouse scores.
+
+**Pull request:** prepared, not opened. `gh` is not installed on this machine and I will not handle credentials, so the description is in [pull-requests.md](pull-requests.md) and can be pasted into GitHub.

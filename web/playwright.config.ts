@@ -7,6 +7,9 @@ export const E2E_ORIGIN = `http://localhost:${PORT}`;
 
 export default defineConfig({
   testDir: "./e2e",
+  // Sweep the reserved test-account namespace before and after the run (interrupted runs cannot leave data behind).
+  globalSetup: "./e2e/global-cleanup.ts",
+  globalTeardown: "./e2e/global-cleanup.ts",
   fullyParallel: true,
   // Every login costs a deliberate 64 MiB Argon2 computation and the tests share a machine with the server,
   // so keep concurrency modest and budgets realistic.
