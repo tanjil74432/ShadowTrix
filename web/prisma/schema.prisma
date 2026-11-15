@@ -6,6 +6,8 @@
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
+  // CommonJS output so Playwright's test loader (which compiles TypeScript to CJS) can import the client.
+  moduleFormat = "cjs"
 }
 
 datasource db {
@@ -144,6 +146,7 @@ model User {
 
   roles            UserRoleAssignment[]
   authTokens       AuthToken[]
+  sessions         Session[]
   auditLogs        AuditLog[]
   organizerOf      EventOrganizer[]
   registrations    Registration[]
@@ -197,6 +200,37 @@ model AuthToken {
   @@index([userId, type])
   @@index([expiresAt])
   @@map("auth_tokens")
+}
+
+/// Server-side login session. The browser only holds a random opaque token; we store its SHA-256.
+/// A leaked database therefore cannot be used to hijack sessions.
+model Session {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  tokenHash     String    @unique @map("token_hash")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt    DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(3) // absolute lifetime; idle timeout is checked against lastSeenAt
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(3)
+  revokedReason String?   @map("revoked_reason")
+  userAgent     String?   @map("user_agent") // truncated; no IP address is stored
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+/// Fixed-window counters for rate limiting, shared by all app instances through Postgres.
+/// Keys are HMACs, so no raw emails or IP addresses are stored here.
+model RateLimit {
+  key         String   @id
+  windowStart DateTime @map("window_start") @db.Timestamptz(3)
+  count       Int
+
+  @@index([windowStart])
+  @@map("rate_limits")
 }
 
 model AuditLog {
