@@ -421,9 +421,12 @@ test.describe("role-based access to APIs", () => {
     expect(me.user.roles.map((r: { role: string }) => r.role)).toEqual(["PARTICIPANT"]);
     expect(me.permissions).not.toContain("admin:access");
     // tampering with login/register bodies cannot inject roles either
-    const reg = await post(request, "/api/v1/auth/register", { email: uniqueEmail("inject"), fullName: "Mallory", password: PASSWORD, roles: ["ADMIN"], role: "ADMIN" });
+    const injectEmail = uniqueEmail("inject");
+    users.track(injectEmail); // cleaned up (with its audit rows) by the fixture
+    const reg = await post(request, "/api/v1/auth/register", { email: injectEmail, fullName: "Mallory", password: PASSWORD, roles: ["ADMIN"], role: "ADMIN" });
     expect(reg.status()).toBe(202);
-    await db().user.deleteMany({ where: { fullName: "Mallory" } });
+    const created = await db().user.findUniqueOrThrow({ where: { email: injectEmail }, include: { roles: true } });
+    expect(created.roles.map((r) => r.role)).toEqual(["PARTICIPANT"]); // the injected roles were ignored
   });
 
   test("administrators manage roles through the API; changes apply at once; safeguards hold", async ({ request, page, users }) => {
