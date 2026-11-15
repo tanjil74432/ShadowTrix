@@ -1,26 +1,154 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/*
+ * ShadowTrix design tokens. Documented in docs/design/design-system.md.
+ * Contrast of every text/background pair below is verified by tests/design-tokens.test.ts,
+ * which parses this file, so edit values here and the tests follow.
+ */
+@theme {
+  /* ── Color: monochrome. Black base, white/silver text. ── */
+  --color-bg: #000000;
+  --color-surface: #0a0a0a;
+  --color-surface-raised: #121212;
+  --color-border: #262626;
+  --color-border-strong: #404040;
+  --color-field-border: #737373; /* form-control boundary, >= 3:1 on bg (WCAG 1.4.11) */
+  --color-fg: #fafafa;
+  --color-fg-muted: #a3a3a3;
+  --color-fg-subtle: #8c8c8c;
+  --color-silver: #d4d4d4;
+  --color-accent: #ffffff;
+  --color-danger: #ff9a9a; /* functional only: form errors, always paired with an icon and text */
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  /* ── Typography ── */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --text-display: clamp(2.5rem, 1.6rem + 4.2vw, 4.75rem);
+  --text-display--line-height: 1.04;
+  --text-display--letter-spacing: -0.035em;
+  --text-h1: clamp(2rem, 1.5rem + 2.2vw, 3rem);
+  --text-h1--line-height: 1.1;
+  --text-h1--letter-spacing: -0.025em;
+  --text-h2: clamp(1.5rem, 1.2rem + 1.2vw, 2.25rem);
+  --text-h2--line-height: 1.15;
+  --text-h2--letter-spacing: -0.02em;
+  --text-h3: 1.25rem;
+  --text-h3--line-height: 1.3;
+  --text-body-lg: 1.125rem;
+  --text-body-lg--line-height: 1.65;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  /* ── Spacing (4px base is Tailwind's default; these are section-level) ── */
+  --spacing-section: 5rem;
+  --spacing-section-lg: 8rem;
+
+  /* ── Radius ── */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* ── Shadow: on black, depth comes from hairline edges, not drop shadows ── */
+  --shadow-card: 0 0 0 1px rgb(255 255 255 / 0.07);
+  --shadow-card-hover: 0 0 0 1px rgb(255 255 255 / 0.22), 0 12px 32px rgb(0 0 0 / 0.7);
+  --shadow-overlay: 0 24px 64px rgb(0 0 0 / 0.85), 0 0 0 1px rgb(255 255 255 / 0.12);
+
+  /* ── Motion ── */
+  --duration-fast: 150ms;
+  --duration-base: 250ms;
+  --duration-slow: 700ms;
+  --ease-out-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* ── Breakpoints: Tailwind defaults, listed for documentation ──
+     sm 40rem (640) · md 48rem (768) · lg 64rem (1024) · xl 80rem (1280) · 2xl 96rem (1536) */
+
+  --animate-reveal: reveal var(--duration-slow) var(--ease-out-soft) both;
+  --animate-pulse-ring: pulse-ring 2s ease-out infinite;
+
+  @keyframes reveal {
+    from {
+      opacity: 0;
+      transform: translateY(0.5rem);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes pulse-ring {
+    from {
+      box-shadow: 0 0 0 0 rgb(255 255 255 / 0.5);
+    }
+    to {
+      box-shadow: 0 0 0 0.5rem rgb(255 255 255 / 0);
+    }
+  }
+  @keyframes shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
   }
 }
 
+html {
+  color-scheme: dark;
+  background: var(--color-bg);
+  scroll-behavior: smooth;
+  scroll-padding-top: 5rem; /* anchor targets clear the sticky header */
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+/* One consistent, always-visible focus indicator. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+/* Matrix-inspired grid, drawn with CSS only. Fades out toward the edges via mask. */
+@utility bg-grid {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.06) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+@utility mask-fade {
+  mask-image: radial-gradient(ellipse 70% 65% at 50% 45%, #000 30%, transparent 100%);
+}
+
+@utility skeleton {
+  background: linear-gradient(90deg, var(--color-surface-raised) 25%, #1d1d1d 50%, var(--color-surface-raised) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
+}
+
+/* Reduced motion: no movement, no looping animation. Final states still apply. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .skeleton {
+    animation: none;
+  }
 }
