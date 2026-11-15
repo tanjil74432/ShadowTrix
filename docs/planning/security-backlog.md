@@ -31,3 +31,14 @@ Owner decisions that shape this list (recorded 2026-11-15): the first administra
 ## Done and verified (for reference)
 
 Argon2id hashing; hashed single-use tokens with concurrency tests; server-side sessions with revocation; role matrix and admin safeguards; rate limiting; Origin-based CSRF; open-redirect protection; enumeration resistance; 12-character password policy (registration and reset); security headers except CSP. See [authentication.md](../architecture/authentication.md) and the [Milestone 4 report](milestone-4-report.md).
+
+## Decisions needed from the owner
+
+1. **Approve the pull requests** (PR 1 for Milestone 3, then PR 2 for Milestone 4) and authorize the merges. See [pull-requests.md](pull-requests.md). Nothing has been merged.
+2. **First administrator:** supply the owner's own account email when ready, and approve running `npm run admin:grant -- <email>`. Prerequisite: the account must already be registered and email-confirmed. No administrator has been granted and no default credentials exist.
+3. **C1 design approval:** accept changing signup so the password is chosen *after* the email is verified (this changes the registration flow and the e2e tests).
+4. **Admin MFA scope (A1):** confirm TOTP with recovery codes, optional for administrators; and whether administrators should get a shorter session lifetime or step-up re-authentication even without MFA.
+5. **Session lifetimes (C3):** confirm 30 days absolute / 7 days idle, or choose shorter values.
+6. **Sequence:** which items (C1 to C6) must be finished before Milestone 5, and which can run alongside it.
+7. **Hosting target**, which fixes `TRUST_PROXY`, `APP_URL`, HTTPS and the choice of scheduler for cleanup (C4).
+8. **Independent security review (C6):** who performs it and when.

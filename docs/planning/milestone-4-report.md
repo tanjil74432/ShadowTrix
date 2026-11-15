@@ -52,16 +52,16 @@ Issues found and fixed **during** this work (not hidden):
 
 | Suite | Result | Notes |
 |---|---|---|
-| Unit and database-backed integration (Vitest) | **213 / 213 pass** (10 files) | real PostgreSQL; Argon2, tokens, CSRF, client IP, redirects, cookies, redaction, email templates, 55-cell RBAC matrix, registration, verification, login, sessions, reset, rate limiter, admin service, first-admin bootstrap, DB constraints |
-| End-to-end (Playwright, Edge locally) | **63 / 63 pass**, run three times in a row without a failure | real SMTP via Mailpit, real PostgreSQL, production build; journey, reset, sessions, role matrix on pages and APIs, CSRF, enumeration, rate limiting, WCAG 2.2 AA on every account page at 360 and 1440 px |
+| Unit and database-backed integration (Vitest) | **218 / 218 pass** (10 files; 213 when this report was first written, 5 added for the 12-character policy) | real PostgreSQL; Argon2, tokens, CSRF, client IP, redirects, cookies, redaction, email templates, 55-cell RBAC matrix, registration, verification, login, sessions, reset, rate limiter, admin service, first-admin bootstrap, DB constraints |
+| End-to-end (Playwright, Edge locally) | **66 / 66 pass** (1 opt-in screenshot test skipped); 63 when first written, 3 added for the 12-character policy | real SMTP via Mailpit, real PostgreSQL, production build; journey, reset, sessions, role matrix on pages and APIs, CSRF, enumeration, rate limiting, WCAG 2.2 AA on every account page at 360 and 1440 px |
 | Fresh-clone simulation of CI | **all steps pass** | `npm ci`, schema validate, **fresh database** migrate, drift check, seed, typecheck, lint, tests, build, e2e, audit |
 | Typecheck (strict) / ESLint | pass / pass | |
 | Production build | pass | no runtime errors in server log |
 | `npm audit` | production: **0 vulnerabilities**; all: 7 moderate, all in dev-only ESLint tooling | |
 | Linux Chromium (Playwright Docker image, CI conditions) | M3 suite 24 / 24 pass | used to investigate the Milestone 3 CI failure |
-| **GitHub Actions on this branch** | **success** (run on `75af64b`): all 15 steps pass, including fresh-database migrations, drift check, 213 unit/integration tests, production build, 63 Playwright tests against a Mailpit service container (Linux Chromium), and the dependency audit | warnings only: GitHub's Node 20 action deprecation notice |
+| **GitHub Actions on this branch** | **success** on the final code (run on `e2ce622`): 21 of 21 workflow steps pass, "66 passed, 1 skipped" for Playwright; the earlier run on `75af64b` was also green. Steps include fresh-database migrations, drift check, 218 unit/integration tests, production build, 66 Playwright tests against a Mailpit service container (Linux Chromium), and the dependency audit | warnings only: GitHub's Node 20 action deprecation notice |
 
-Test-count breakdown by file: admin-users 12, auth-password 11, auth-security-units 19, auth-service 36, authz 11 (expands to 55 matrix cases), db-integrity 18, design-tokens 4 (expands to 20), env 8, event-logic 10, grant-admin 3.
+Per-file test counts: see `web/tests` (Vitest expands table-driven tests, so file-level counts understate the total).
 
 Tests that deliberately do **not** exist yet: load/performance, penetration testing, Firefox/WebKit, real-device and screen-reader testing, email rendering across mail clients.
 
@@ -105,3 +105,5 @@ Other notes: GitHub reports that the `actions/checkout@v4` and `actions/setup-no
 Confirmed by the owner: the first administrator will be **the owner's own account** (email not yet supplied; no admin has been granted, `admin:grant` has not been run, no default credentials exist); **admin MFA will be optional**, never mandatory (not yet implemented); **minimum password length is 12 characters**; merging M3 and M4 and granting the admin role each require explicit approval.
 
 Implemented since: the 12-character minimum, from one shared constant (`web/src/lib/password-policy.ts`) used by the server validation, the registration and reset forms and their hints. It applies to registration and password reset; there is no change-password flow yet, so none could be updated. Maximum length (128), the common-password list, the email-name check and Argon2id settings are unchanged. Tests: 19 password unit tests (boundary 11 rejected / 12 accepted, multi-byte counting, registration and reset schemas) and 3 new Playwright tests (API and real forms, including the reset flow). Prioritized remaining work: [security-backlog.md](security-backlog.md).
+
+CI note: the first run after the policy change failed on two timing assertions that were calibrated to a slower machine (an Argon2 hash takes ~120 ms on the development laptop and ~45 ms on GitHub's runner). The product behaviour was correct; the tests were replaced with behavioural spy assertions and relative comparisons, and CI is green on `e2ce622`.
