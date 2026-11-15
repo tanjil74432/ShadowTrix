@@ -9,7 +9,7 @@ Next.js (App Router) + TypeScript + Tailwind + Prisma/PostgreSQL. See the reposi
 docker compose up -d
 
 # 2. In web/
-cp .env.example .env          # then set AUTH_SECRET (needed from Milestone 4)
+cp .env.example .env          # then set AUTH_SECRET: 32+ random characters (required; see .env.example)
 npm install                   # also generates the Prisma client
 npm run db:deploy             # apply migrations
 npm run db:seed               # reference data only (operator org, units, designations)
