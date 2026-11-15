@@ -32,6 +32,8 @@ npm install
 npm run db:deploy && npm run db:seed
 npm run dev          # http://localhost:3010
 npm run admin:grant -- you@example.com   # after registering and confirming that account: makes it the first administrator
+npm run maintenance:cleanup               # housekeeping (expired sessions/tokens, stale signups); schedule daily
+npm run admin:mfa-reset -- you@example.com # break-glass: turn off an administrator's optional two-step verification
 ```
 
 Details: [web/README.md](web/README.md).

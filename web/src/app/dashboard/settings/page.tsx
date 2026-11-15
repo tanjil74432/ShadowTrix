@@ -2,12 +2,15 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { AreaNav } from "@/components/dashboard/area-nav";
 import { ChangePasswordForm } from "@/components/dashboard/change-password-form";
+import { MfaPanel } from "@/components/dashboard/mfa-panel";
 import { ProfileForm } from "@/components/dashboard/profile-form";
 import { LogoutButton } from "@/components/auth/logout-button";
 import { Container } from "@/components/ui/container";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireUser } from "@/server/modules/auth/dal";
+import { getMfaStatus } from "@/server/modules/auth/mfa.service";
 import { getOwnProfile } from "@/server/modules/auth/profile.service";
+import { hasGlobalRole } from "@/server/modules/authz/permissions";
 
 export const metadata: Metadata = { title: "Account settings", robots: { index: false, follow: false } };
 
@@ -24,6 +27,8 @@ export default function SettingsPage() {
 async function SettingsContent() {
   const user = await requireUser("/dashboard/settings");
   const row = await getOwnProfile(user.id);
+  const isAdmin = hasGlobalRole(user, "ADMIN");
+  const mfa = isAdmin ? await getMfaStatus(user.id) : null;
   return (
     <>
       <AreaNav user={user} current="settings" />
@@ -39,6 +44,12 @@ async function SettingsContent() {
           <p className="text-sm text-fg-muted">Changing your password signs you out of every other device.</p>
           <ChangePasswordForm />
         </section>
+        {mfa && (
+          <section aria-labelledby="mfa-heading" className="space-y-5">
+            <h2 id="mfa-heading" className="text-h3 font-semibold">Two-step verification (optional)</h2>
+            <MfaPanel enabled={mfa.enabled} recoveryCodesLeft={mfa.recoveryCodesLeft} />
+          </section>
+        )}
         <section aria-labelledby="session-heading" className="space-y-4">
           <h2 id="session-heading" className="text-h3 font-semibold">Session</h2>
           <LogoutButton />

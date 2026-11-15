@@ -84,6 +84,8 @@ export async function grantRole(actor: Actor, targetId: string, role: RoleKey): 
     if (!existing) {
       await tx.userRoleAssignment.create({ data: { userId: targetId, role, grantedById: actor.id } });
       await writeAudit({ actorId: actor.id, action: "admin.role_granted", entityType: "user", entityId: targetId, after: { role } }, tx);
+      // A privilege change ends the target's existing sessions, so they sign in again and get a fresh token.
+      if (targetId !== actor.id) await revokeAllUserSessions(targetId, "role_changed", tx);
     }
     return toView(await tx.user.findUniqueOrThrow({ where: { id: targetId }, include: { roles: true } }));
   });
@@ -109,6 +111,7 @@ export async function revokeRole(actor: Actor, targetId: string, role: RoleKey):
     const removed = await tx.userRoleAssignment.deleteMany({ where: { userId: targetId, role, eventId: null, organizationId: null } });
     if (removed.count > 0) {
       await writeAudit({ actorId: actor.id, action: "admin.role_revoked", entityType: "user", entityId: targetId, before: { role } }, tx);
+      if (targetId !== actor.id) await revokeAllUserSessions(targetId, "role_changed", tx);
     }
     return toView(await tx.user.findUniqueOrThrow({ where: { id: targetId }, include: { roles: true } }));
   });

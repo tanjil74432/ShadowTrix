@@ -17,13 +17,15 @@ export function LoginForm() {
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<ApiResult | null>(null);
   const [email, setEmail] = useState("");
+  const [needsCode, setNeedsCode] = useState(false);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
     setEmail(String(form.get("email") ?? ""));
     setPending(true);
-    const res = await sendJson("/api/v1/auth/login", { email: form.get("email"), password: form.get("password") });
+    const res = await sendJson("/api/v1/auth/login", { email: form.get("email"), password: form.get("password"), ...(form.get("code") ? { code: form.get("code") } : {}) });
+    if (!res.ok && (res.code === "mfa_required" || res.code === "invalid_mfa_code")) setNeedsCode(true);
     if (res.ok) {
       // Full navigation so the server renders the next page with the new session cookie.
       window.location.assign(next);
@@ -55,6 +57,11 @@ export function LoginForm() {
         <Field label="Password" required error={errors.password}>
           {(p) => <PasswordInput {...p} name="password" autoComplete="current-password" />}
         </Field>
+        {needsCode && (
+          <Field label="Authenticator or recovery code" required hint="You turned on two-step verification for this account.">
+            {(p) => <Input {...p} name="code" autoComplete="one-time-code" inputMode="text" autoFocus />}
+          </Field>
+        )}
         <Button type="submit" size="lg" className="w-full" disabled={pending} aria-disabled={pending}>
           {pending ? <Spinner label="Logging in" className="text-bg" /> : "Log in"}
         </Button>

@@ -161,6 +161,8 @@ model User {
   announcements    Announcement[]
   createdEvents    Event[]              @relation("EventCreator")
   orgMember        OrgMember?
+  mfa              UserMfa?
+  mfaRecoveryCodes MfaRecoveryCode[]
 
   @@map("users")
 }
@@ -200,6 +202,33 @@ model AuthToken {
   @@index([userId, type])
   @@index([expiresAt])
   @@map("auth_tokens")
+}
+
+/// Optional TOTP second factor (administrators). The secret is stored encrypted; enabledAt is null until the user proves the app works.
+model UserMfa {
+  userId       String    @id @map("user_id") @db.Uuid
+  secretEnc    String    @map("secret_enc")
+  enabledAt    DateTime? @map("enabled_at") @db.Timestamptz(3)
+  lastUsedStep BigInt?   @map("last_used_step") // TOTP time step last accepted: a code cannot be replayed
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_mfa")
+}
+
+/// One-time recovery codes for when the authenticator is lost. Only SHA-256 hashes are stored.
+model MfaRecoveryCode {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @unique @map("code_hash")
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("mfa_recovery_codes")
 }
 
 /// Server-side login session. The browser only holds a random opaque token; we store its SHA-256.

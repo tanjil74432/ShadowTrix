@@ -4,6 +4,9 @@ import { defineConfig } from "@playwright/test";
 
 const PORT = 3011; // separate from the dev port (3010) so tests never collide with a running dev server
 export const E2E_ORIGIN = `http://localhost:${PORT}`;
+// Shared with the test workers (they inherit this process's environment) so the cleanup endpoint can be tested.
+// (The config is evaluated again inside every worker, so keep the value the main process already generated.)
+process.env.E2E_CRON_SECRET ??= randomBytes(24).toString("hex");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -41,6 +44,7 @@ export default defineConfig({
       // A fresh random secret per run: nothing predictable, nothing committed.
       AUTH_SECRET: randomBytes(48).toString("base64url"),
       TRUST_PROXY: "false",
+      CRON_SECRET: process.env.E2E_CRON_SECRET,
     },
   },
 });

@@ -10,6 +10,7 @@ Configuration is read from the environment and validated once by `web/src/server
 | `TRUST_PROXY` | no | `false` | Set `true` **only** behind a reverse proxy that overwrites `X-Forwarded-For`; the right-most entry is then used for IP rate limits. When `false`, IP limits are skipped and per-account limits still apply. |
 | `SESSION_ABSOLUTE_TTL_DAYS` | no | `30` | Maximum session age (1 to 90). |
 | `SESSION_IDLE_TTL_DAYS` | no | `7` | Session dies after this many unused days (1 to 30). |
+| `CRON_SECRET` | no | unset | 32+ random characters. Bearer secret for `POST /api/v1/internal/cleanup`. Unset = endpoint disabled (404). Never commit it. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` | no | `localhost`, `1025`, `false`, none, none | Outgoing email. Mailpit (docker compose) in development. |
 | `EMAIL_FROM` | no | `ShadowTrix <no-reply@shadowtrix.local>` | Sender. Use a real, authenticated domain in production. |
 | `STORAGE_DRIVER` and `S3_*`, `STORAGE_LOCAL_DIR` | no | `local` | File storage (used from Milestone 7). `s3` requires `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. |

@@ -431,7 +431,7 @@ test.describe("role-based access to pages", () => {
     { role: "JUDGE", allowed: ["/dashboard", "/judge"] },
     { role: "ADMIN", allowed: ["/dashboard", "/organizer", "/judge", "/admin"] },
   ];
-  const HEADINGS: Record<string, string> = { "/dashboard": "Welcome", "/organizer": "Organizer area", "/judge": "Judge area", "/admin": "Administration" };
+  const HEADINGS: Record<string, string> = { "/dashboard": "Welcome", "/organizer": "Organizer dashboard", "/judge": "Judge area", "/admin": "Administration" };
 
   for (const { role, allowed } of MATRIX) {
     test(`${role}: reaches exactly ${allowed.join(", ")} and sees an access-denied view (no protected data) elsewhere`, async ({ page, users }) => {
@@ -469,7 +469,10 @@ test.describe("role-based access to pages", () => {
     const bossLogin = await apiLogin(request, boss.email);
     const res = await request.delete(`/api/v1/admin/users/${helper.id}/roles/ADMIN`, { headers: { Origin: ORIGIN, Cookie: `${COOKIE}=${bossLogin.cookie}` } });
     expect(res.status()).toBe(200);
+    // The demotion also revoked their session: they are asked to sign in again, and then have no access.
     await page.goto("/admin");
+    await expect(page).toHaveURL(/\/login\?next=%2Fadmin$/);
+    await uiLogin(page, helper, "/admin");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("You do not have access");
   });
 
@@ -542,10 +545,15 @@ test.describe("role-based access to APIs", () => {
     await uiLogin(page, target, "/organizer");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("You do not have access");
     expect((await post(request, `/api/v1/admin/users/${target.id}/roles`, { role: "ORGANIZER" }, h)).status()).toBe(200);
+    // A privilege change signs the person out (their old session never outlives the role it was issued under).
     await page.goto("/organizer");
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Organizer area");
+    await expect(page).toHaveURL(/\/login\?next=%2Forganizer$/);
+    await uiLogin(page, target, "/organizer");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Organizer dashboard");
     expect((await request.delete(`/api/v1/admin/users/${target.id}/roles/ORGANIZER`, { headers: { Origin: ORIGIN, Cookie: `${COOKIE}=${cookie}` } })).status()).toBe(200);
     await page.goto("/organizer");
+    await expect(page).toHaveURL(/\/login\?next=%2Forganizer$/);
+    await uiLogin(page, target, "/organizer");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("You do not have access");
 
     // safeguards

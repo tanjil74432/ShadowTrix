@@ -59,6 +59,8 @@ export const completeRegistrationSchema = z.object({ token, fullName, password: 
 export const loginSchema = z.object({
   email,
   password: z.string().min(1, "Enter your password.").max(PASSWORD_MAX),
+  // Second factor, only for accounts that turned it on. Authenticator code or one-time recovery code.
+  code: z.string().trim().max(20).optional(),
 });
 
 /** Signed-in password change: the current password proves the person at the keyboard is the account owner. */

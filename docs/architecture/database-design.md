@@ -39,6 +39,8 @@ Conventions: UUIDv7 ids; `created_at`/`updated_at` as `timestamptz`; snake_case 
 
 ## Change log
 
+- **v1.3 (Milestones 5 and 6 and auth hardening):** CHECK `events_slug_format_chk`; CHECK `registrations_cancelled_consistency_chk` (cancelled exactly when it has a cancellation time); indexes `events_status_category_starts_idx`, `registrations_event_status_registered_idx`, `event_organizers_user_idx`; new tables `user_mfa` (encrypted TOTP secret, replay guard) and `mfa_recovery_codes` (hashes only). All additive, no data migration. Fresh database: 7 migrations, 22 CHECK constraints, 1 trigger, no drift.
+
 - **v1.2 (Milestone 4):** added `sessions` and `rate_limits`. Constraints: `sessions_expiry_chk` (expiry after creation), `rate_limits_count_chk`, `auth_tokens_expiry_chk`, and the partial unique index `auth_tokens_one_live_per_type_idx` (a user has at most one unused email-verification token and one unused password-reset token, so issuing a new link necessarily voids the old one). Sessions cascade-delete with their user. No IP addresses are stored: sessions keep a truncated user agent only, and rate-limit keys are HMACs. The Prisma client is now generated as CommonJS (needed by the Playwright test loader).
 
 - **v1.1 (Milestone 3):** added `events.judging_starts_at`, `judging_ends_at` and `results_announcement_at` (planned result date; `results_published_at` remains the actual publication time) so every event can show its five distinct phases: registration, event, submission, judging, results. Added ordering CHECK constraints (judging after submission deadline, results after judging) with tests. Declared the `org_members_public_idx` index in the Prisma schema so migrations no longer try to drop it.

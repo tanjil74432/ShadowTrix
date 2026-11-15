@@ -40,8 +40,8 @@ Signup has two steps: the visitor enters **only an email address**, then proves 
 
 ## Password policy and multi-factor authentication
 
-- **Passwords:** 12 to 128 characters (owner-approved minimum of 12), not on the common-password list, not containing the part of the email before the `@`, not one repeated character. No composition rules (they push people to predictable patterns); spaces and Unicode are allowed and length is counted in characters. The limits live in one constant (`web/src/lib/password-policy.ts`) shared by the server validation and the form hints, and apply to registration and password reset. A change-password flow does not exist yet; when it is added it must use the same schema.
-- **MFA:** policy is that administrator MFA will be **optional** and must never block an administrator who has not enrolled. It is **not implemented yet**; see [../planning/security-backlog.md](../planning/security-backlog.md).
+- **Passwords:** 12 to 128 characters (owner-approved minimum of 12), not on the common-password list, not containing the part of the email before the `@`, not one repeated character. No composition rules (they push people to predictable patterns); spaces and Unicode are allowed and length is counted in characters. The limits live in one constant (`web/src/lib/password-policy.ts`) shared by the server validation and the form hints, and apply to registration and password reset. Signed-in **change-password** (`POST /auth/change-password`) uses the same rules, requires the current password, signs out every other device and rotates this browser's session.
+- **MFA (optional, administrators):** TOTP (RFC 6238; SHA-1, 6 digits, 30 s; verified against the RFC's published test vectors) with 10 one-time recovery codes. It is **never mandatory**: an administrator who has not enrolled signs in with the password alone, and nothing blocks them. Enrollment is in *Account settings* and is inactive until a correct code is confirmed. The secret is stored encrypted (AES-256-GCM, key derived from `AUTH_SECRET`; losing or changing `AUTH_SECRET` makes enrolled secrets unreadable, use `npm run admin:mfa-reset -- <email>`), recovery codes only as SHA-256 hashes. At login the code is requested only **after** the password was correct; each time step is accepted once (replay and concurrent use are rejected atomically) and each recovery code works once. Turning it off needs the password and a valid code. Break-glass for a lost device and lost recovery codes: `npm run admin:mfa-reset -- <email>` (database access required; audited; revokes the account's sessions).
 
 ## Sessions
 
@@ -50,8 +50,8 @@ Signup has two steps: the visitor enters **only an email address**, then proves 
 | Cookie | `st_session` (`__Host-st_session`, with `Secure`, when `APP_URL` is https); HttpOnly; SameSite=Lax; Path=/ |
 | Absolute lifetime | 30 days (`SESSION_ABSOLUTE_TTL_DAYS`) |
 | Idle timeout | 7 days of no use (`SESSION_IDLE_TTL_DAYS`); `last_seen_at` is refreshed at most every 5 minutes |
-| Revoked by | logout, password reset, suspension |
-| Rotation | New token at every login; all sessions replaced on password reset. There is no periodic rotation of a live session (see limitations). |
+| Revoked by | logout, password reset, password change (all devices), suspension, a role being granted or revoked (the person signs in again and gets a fresh token) |
+| Rotation | New token at every login and password change; all sessions replaced on password reset and on privilege changes. There is no time-based rotation of a live session (see limitations). |
 | Stored | token hash, timestamps, revocation reason, truncated user agent. No IP address. |
 
 ## Authorization
@@ -91,13 +91,17 @@ Administrator safeguards (`admin-users.service.ts`): cannot demote or suspend yo
 | Information leaks | Redacting logger; allow-list DTOs; generic 500s; `Cache-Control: no-store` on API; `Referrer-Policy: no-referrer` on token pages | unit + e2e |
 | Clickjacking / sniffing | `X-Frame-Options: DENY`, `nosniff`, HSTS, Permissions-Policy | e2e header test |
 
+## Scheduled cleanup
+
+`runCleanup` (`web/src/server/modules/maintenance/cleanup.core.ts`) removes: sessions expired or revoked more than 7 days ago; auth tokens expired or used more than 7 days ago (live tokens are never touched); rate-limit counters older than a day; and **stale unverified signups** (older than 7 days, no password, never logged in, no registrations or created events, no sessions, only the base participant role). A verified account is never deleted. It writes one `maintenance.cleanup` audit row with the counts. Run it with `npm run maintenance:cleanup`, or call `POST /api/v1/internal/cleanup` with `Authorization: Bearer <CRON_SECRET>` (the endpoint is off unless `CRON_SECRET`, 32+ characters, is set). Suggested schedule: daily.
+
 ## Known limitations (honest list)
 
-1. **No periodic session-token rotation** for a live session; rotation happens at login, password reset and suspension.
-2. **No scheduled cleanup.** `purgeDeadSessions` and `purgeExpiredRateLimits` exist but nothing runs them yet; expired rows are harmless but accumulate. Unverified accounts are not auto-expired.
-3. **Pending accounts accumulate until cleanup exists.** The takeover risk is closed (see above), but unverified pending rows are not yet expired (scheduled cleanup is backlog item C4). Residual nuisance: anyone can trigger confirmation emails to an address (rate limited per address and per IP), and a new request voids the previous link.
-4. **No change-password screen for signed-in users, no email change, no multi-factor authentication (optional for admins by policy, not built), no social login, no "sign out other devices" screen.** Password reset covers recovery; the rest is planned work.
-5. **Content-Security-Policy is not set yet** (needs a nonce strategy); scheduled for the hardening milestone.
+1. **No time-based rotation of a live session token.** Rotation happens at login, password change, password reset, suspension and role changes. A time-based rotation needs to set a cookie while a page renders, which Next.js does not allow; it would have to be done in an API call or a proxy and was not built. Lifetimes (30 days absolute, 7 days idle) are unchanged and still need the owner's review. Administrators do not have a shorter session policy yet.
+2. **Cleanup exists but something must call it.** `npm run maintenance:cleanup` (once) or `POST /api/v1/internal/cleanup` with `Authorization: Bearer <CRON_SECRET>` runs it; the platform does not schedule it by itself. Pick a free scheduler once hosting is chosen (cron, a GitHub Actions schedule, or the host's cron feature). See *Scheduled cleanup* below.
+3. **Pending accounts are removed by the cleanup job** after 7 days (only accounts with no password, no login, no registrations or events and only the base role). Residual nuisance: anyone can trigger confirmation emails to an address (rate limited per address and per IP), and a new request voids the previous link.
+4. **No email change, no social login, no "sign out other devices" screen, no session list.** MFA is available to administrators only, and only TOTP (no WebAuthn or SMS). The setup key is shown as text (no QR code) to avoid a dependency.
+5. **The Content-Security-Policy allows `'unsafe-inline'` for scripts and styles.** Next.js needs inline bootstrap scripts and a nonce-based policy would force every page to render per request, giving up the static shell. Everything else is locked to our own origin (no external scripts, frames, images, fonts, or connections; `object-src 'none'`, `base-uri`/`form-action` self, `frame-ancestors 'none'`). An injected external script is blocked (e2e-tested); an injected *inline* script would not be. A nonce or hash policy is open work.
 6. **IP-based limits depend on `TRUST_PROXY`.** Route handlers cannot see the socket address, so without a trusted proxy only the per-account limits apply.
 7. **The header is session-aware, so pages are no longer served as fully static, CDN-cacheable HTML** (`Cache-Control: private, no-store`). The prerendered shell still makes them fast; a CDN would not cache them.
 8. **`APP_URL` is baked into prerendered metadata**, so it must be identical at build and run time.

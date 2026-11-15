@@ -13,7 +13,7 @@ export default async function globalCleanup() {
     select: { id: true },
   });
   const ids = doomed.map((u) => u.id);
-  const eventIds = ids.length ? (await client.event.findMany({ where: { createdById: { in: ids } }, select: { id: true } })).map((e) => e.id) : [];
+  const eventIds = (await client.event.findMany({ where: { OR: [{ createdById: { in: ids } }, { slug: { startsWith: "e2e-" } }, { slug: { startsWith: "vt-" } }] }, select: { id: true } })).map((e) => e.id);
   if (eventIds.length) {
     await client.auditLog.deleteMany({ where: { entityId: { in: eventIds } } });
     await client.event.deleteMany({ where: { id: { in: eventIds } } });

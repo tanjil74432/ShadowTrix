@@ -68,9 +68,15 @@ describe("role management", () => {
     const { token } = await createSession(target.id);
     expect((await getSessionUser(token))!.user.roles.map((r) => r.role)).toEqual(["PARTICIPANT"]);
     await grantRole(actorOf(admin), target.id, "JUDGE");
-    expect((await getSessionUser(token))!.user.roles.map((r) => r.role)).toContain("JUDGE");
+    // A privilege change also ends the target's existing sessions (they sign in again and get a fresh token),
+    // so there is never a session that outlives the role it was issued under.
+    expect(await getSessionUser(token)).toBeNull();
+    const second = await createSession(target.id);
+    expect((await getSessionUser(second.token))!.user.roles.map((r) => r.role)).toContain("JUDGE");
     await revokeRole(actorOf(admin), target.id, "JUDGE");
-    expect((await getSessionUser(token))!.user.roles.map((r) => r.role)).not.toContain("JUDGE");
+    expect(await getSessionUser(second.token)).toBeNull();
+    const third = await createSession(target.id);
+    expect((await getSessionUser(third.token))!.user.roles.map((r) => r.role)).not.toContain("JUDGE");
   });
 
   it("refuses team leader (derived), the base participant removal, unknown users and self-demotion", async () => {

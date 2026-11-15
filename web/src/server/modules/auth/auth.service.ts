@@ -17,6 +17,7 @@ import { enforceRateLimits, POLICIES } from "@/server/security/rate-limit";
 import { generateToken, hashToken } from "@/server/security/tokens";
 import { ZodError } from "zod";
 import { passwordIssues, type CompleteRegistrationInput, type LoginInput, type RegisterInput } from "./auth.schema";
+import { checkSecondFactor, isMfaEnabled } from "./mfa.service";
 import { burnPasswordVerification, hashPassword, needsRehash, verifyPassword } from "./password";
 import { createSession, revokeAllUserSessions, revokeSessionByToken, type SessionLimits, type SessionUser } from "./session.service";
 
@@ -246,6 +247,15 @@ export async function login(input: LoginInput, ctx: RequestContext, deps: AuthDe
 
   if (user.status !== "ACTIVE") throw new AppError(403, "account_suspended", "This account has been suspended. Contact the organizers.");
   if (!user.emailVerifiedAt) throw new AppError(403, "email_not_verified", "Confirm your email address before logging in.");
+
+  // Optional second factor. Only reached after the password was proven, so asking reveals nothing to a guesser.
+  if (await isMfaEnabled(user.id)) {
+    if (!input.code) throw new AppError(401, "mfa_required", "Enter the 6-digit code from your authenticator app, or a recovery code.");
+    if (!(await checkSecondFactor(user.id, input.code, deps.now()))) {
+      await writeAudit({ actorId: user.id, action: "auth.mfa_failed", entityType: "user", entityId: user.id });
+      throw new AppError(401, "invalid_mfa_code", "That code is not correct.");
+    }
+  }
 
   const now = deps.now();
   if (needsRehash(user.passwordHash)) {

@@ -22,6 +22,8 @@ const schema = z
     TRUST_PROXY: bool,
     SESSION_ABSOLUTE_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
     SESSION_IDLE_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(7),
+    // Bearer secret for the scheduler endpoint POST /api/v1/internal/cleanup. Unset = endpoint disabled.
+    CRON_SECRET: z.string().min(32).optional(),
 
     SMTP_HOST: z.string().default("localhost"),
     SMTP_PORT: z.coerce.number().int().positive().default(1025),

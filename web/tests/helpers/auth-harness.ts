@@ -82,7 +82,8 @@ export async function cleanup() {
   });
   const ids = doomed.map((u) => u.id);
   // Events the test users created go first (their registrations and organizer rows cascade), with their audit rows.
-  const eventIds = ids.length ? (await db.event.findMany({ where: { createdById: { in: ids } }, select: { id: true } })).map((e) => e.id) : [];
+  // (also any leftover from an interrupted run: test events carry the reserved vt- slug prefix)
+  const eventIds = (await db.event.findMany({ where: { OR: [{ createdById: { in: ids } }, { slug: { startsWith: "vt-" } }] }, select: { id: true } })).map((e) => e.id);
   if (eventIds.length) {
     await db.auditLog.deleteMany({ where: { entityId: { in: eventIds } } });
     await db.event.deleteMany({ where: { id: { in: eventIds } } });
@@ -91,5 +92,7 @@ export async function cleanup() {
     await db.auditLog.deleteMany({ where: { OR: [{ actorId: { in: ids } }, { entityId: { in: ids } }] } });
     await db.user.deleteMany({ where: { id: { in: ids } } });
   }
-  await purgeExpiredRateLimits(0);
+  // Only counters from windows that ended a while ago: test files run in parallel, and wiping every counter would
+  // reset the rate-limit state of a test that is still running in another file.
+  await purgeExpiredRateLimits(300);
 }

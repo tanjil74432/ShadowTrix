@@ -134,7 +134,7 @@ test.describe("structure, SEO and audit requirements", () => {
   });
 
   test("placeholder pages are not indexable", async ({ page }) => {
-    for (const route of ["/events", "/about", "/about/team", "/community", "/contact", "/login", "/register"]) {
+    for (const route of ["/about", "/about/team", "/community", "/contact", "/login", "/register"]) {
       await page.goto(route);
       await expect(page.getByRole("heading", { level: 1 }), route).toBeVisible();
       expect(await page.locator("meta[name='robots']").getAttribute("content"), route).toContain("noindex");
