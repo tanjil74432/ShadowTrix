@@ -29,9 +29,19 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      # Real SMTP sink: the auth end-to-end tests read the emails the app actually sends (verification, reset).
+      mailpit:
+        image: axllent/mailpit:latest
+        ports:
+          - 1025:1025
+          - 8025:8025
     env:
       DATABASE_URL: postgresql://shadowtrix:ci_only_password@localhost:5432/shadowtrix?schema=public
       APP_URL: http://localhost:3010
+      # CI-only value protecting nothing (throwaway database, no real data). Real secrets are never committed.
+      AUTH_SECRET: ci-only-auth-signing-key-0123456789abcdefghijklmnop
+      SMTP_HOST: localhost
+      SMTP_PORT: "1025"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,19 +54,28 @@ jobs:
         run: npx prisma validate
       - name: Apply migrations to a clean database
         run: npm run db:deploy
+      - name: Verify migrations match the Prisma schema (no drift)
+        run: npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
       - name: Seed reference data
         run: npm run db:seed
       - name: Typecheck
         run: npm run typecheck
       - name: Lint
         run: npm run lint
-      - name: Test (unit + database integrity)
+      - name: Test (unit, security, authorization and database integrity)
         run: npm test
       - name: Build
         run: npm run build
+      - name: Wait for Mailpit
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8025/api/v1/info > /dev/null && exit 0
+            sleep 2
+          done
+          echo "Mailpit did not become ready" && exit 1
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
-      - name: End-to-end, responsive and accessibility tests
+      - name: End-to-end, authentication, responsive and accessibility tests
         run: npm run test:e2e
       - name: Dependency audit (production dependencies, high+)
         run: npm audit --omit=dev --audit-level=high

@@ -26,8 +26,8 @@ Navigation includes **About Us → Our Team**; the homepage carries a compact le
 
 ## Security model
 
-- Argon2id password hashes; hashed single-use tokens with expiry for verification and reset.
-- Session in an httpOnly, Secure, SameSite cookie; CSRF protection on state-changing requests.
+- Implemented in Milestone 4 (see [authentication.md](authentication.md)). Argon2id password hashes; hashed single-use tokens with expiry for verification and reset.
+- Server-side sessions: random opaque token in an HttpOnly, SameSite=Lax cookie (Secure and `__Host-` on https), validated against the database on every request; CSRF protection on all state-changing requests.
 - RBAC in services, default deny, plus resource-level checks (team leader edits own team; judges see assigned events; organizers manage their events).
 - Zod validation on every input; output shaped explicitly so sensitive fields (password hash, token hashes) never serialize.
 - Rate limiting on auth and contact endpoints; security headers (CSP, HSTS, etc.).

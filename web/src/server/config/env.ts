@@ -16,7 +16,12 @@ const schema = z
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     DATABASE_URL: z.string().min(1),
     APP_URL: z.url().default("http://localhost:3010"),
-    AUTH_SECRET: z.string().min(32).optional(), // required from Milestone 4 (auth)
+    // HMAC key for rate-limit keys and token hashing contexts. >= 32 chars; required in production.
+    AUTH_SECRET: z.string().min(32).optional(),
+    // Set true ONLY behind a reverse proxy that overwrites X-Forwarded-For. Otherwise the header is attacker-controlled.
+    TRUST_PROXY: bool,
+    SESSION_ABSOLUTE_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
+    SESSION_IDLE_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(7),
 
     SMTP_HOST: z.string().default("localhost"),
     SMTP_PORT: z.coerce.number().int().positive().default(1025),
@@ -39,8 +44,17 @@ const schema = z
         if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: `${key} is required when STORAGE_DRIVER=s3` });
       }
     }
-    if (env.NODE_ENV === "production" && !env.AUTH_SECRET) {
-      ctx.addIssue({ code: "custom", path: ["AUTH_SECRET"], message: "AUTH_SECRET is required in production" });
+    if (env.NODE_ENV === "production") {
+      if (!env.AUTH_SECRET) {
+        ctx.addIssue({ code: "custom", path: ["AUTH_SECRET"], message: "AUTH_SECRET is required in production" });
+      } else if (/change-me|dev-only|example/i.test(env.AUTH_SECRET)) {
+        ctx.addIssue({ code: "custom", path: ["AUTH_SECRET"], message: "AUTH_SECRET looks like a placeholder; generate a real secret" });
+      }
+      const host = new URL(env.APP_URL).hostname;
+      const isLocal = host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+      if (!env.APP_URL.startsWith("https://") && !isLocal) {
+        ctx.addIssue({ code: "custom", path: ["APP_URL"], message: "APP_URL must be https in production (cookies are Secure); only localhost may use http" });
+      }
     }
   });
 
@@ -60,4 +74,11 @@ let cached: Env | undefined;
 export function getEnv(): Env {
   cached ??= parseEnv(process.env);
   return cached;
+}
+
+/** AUTH_SECRET is only needed by auth features; fail with a clear message when it is missing. */
+export function getAuthSecret(): string {
+  const secret = getEnv().AUTH_SECRET;
+  if (!secret) throw new Error("AUTH_SECRET is not set (min 32 characters). See web/.env.example.");
+  return secret;
 }

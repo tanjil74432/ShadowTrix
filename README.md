@@ -4,7 +4,7 @@
 
 ShadowTrix is a centralized platform for organizing, managing, and participating in hackathons, datathons, AI/ML competitions, programming contests, workshops, tech summits, and innovation challenges. Operated by Team EU Shadow.
 
-**Status:** Milestone 2 complete (architecture, schema, scaffold, Docker, CI). No product features yet. See [roadmap](docs/planning/roadmap.md) and the [Milestone 2 report](docs/planning/milestone-2-report.md).
+**Status:** Milestones 1 to 3 complete (M3 CI green on GitHub); Milestone 4 (authentication and authorization) implemented and verified, awaiting review. See the [roadmap](docs/planning/roadmap.md), the [Milestone 4 report](docs/planning/milestone-4-report.md) and the [prepared pull requests](docs/planning/pull-requests.md).
 
 ## Brand
 
@@ -27,9 +27,11 @@ ShadowTrix/
 
 ```bash
 docker compose up -d
-cd web && cp .env.example .env && npm install
+cd web && cp .env.example .env     # then set AUTH_SECRET (32+ random characters; see .env.example)
+npm install
 npm run db:deploy && npm run db:seed
 npm run dev          # http://localhost:3010
+npm run admin:grant -- you@example.com   # after registering and confirming that account: makes it the first administrator
 ```
 
 Details: [web/README.md](web/README.md).
@@ -41,6 +43,7 @@ Details: [web/README.md](web/README.md).
 - [Module boundaries & API conventions](docs/architecture/module-boundaries.md)
 - [Database design](docs/architecture/database-design.md)
 - [Reference analysis](docs/design/reference-analysis.md)
+- [Authentication and authorization](docs/architecture/authentication.md) · [Auth and admin API](docs/api/auth-and-admin-api.md) · [Environment variables](docs/architecture/environment-variables.md)
 - [Roadmap](docs/planning/roadmap.md) · [Implementation plan](docs/planning/implementation-plan.md)
 
 ## Principles

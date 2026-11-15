@@ -202,3 +202,79 @@ describe("database integrity", () => {
     });
   });
 });
+
+describe("authentication tables", () => {
+  const tokenData = (userId: string, over: Partial<Prisma.AuthTokenUncheckedCreateInput> = {}): Prisma.AuthTokenUncheckedCreateInput => ({
+    userId,
+    type: "EMAIL_VERIFY",
+    tokenHash: uniq(),
+    createdAt: hours(0),
+    expiresAt: hours(1),
+    ...over,
+  });
+
+  it("rejects sessions that expire before they are created", async () => {
+    await expect(
+      rolledBack(async (tx) => {
+        const u = await user(tx);
+        await tx.session.create({ data: { userId: u.id, tokenHash: uniq(), createdAt: hours(5), expiresAt: hours(1) } });
+      }),
+    ).rejects.toThrow(/sessions_expiry_chk/);
+  });
+
+  it("stores each session token hash once", async () => {
+    await expect(
+      rolledBack(async (tx) => {
+        const u = await user(tx);
+        const hash = uniq();
+        const expiresAt = new Date(Date.now() + 3_600_000);
+        await tx.session.create({ data: { userId: u.id, tokenHash: hash, expiresAt } });
+        await tx.session.create({ data: { userId: u.id, tokenHash: hash, expiresAt } });
+      }),
+    ).rejects.toThrow(/sessions_token_hash_key/);
+  });
+
+  it("deletes a user's sessions and tokens together with the user", async () => {
+    await rolledBack(async (tx) => {
+      const u = await user(tx);
+      await tx.session.create({ data: { userId: u.id, tokenHash: uniq(), expiresAt: new Date(Date.now() + 3_600_000) } });
+      await tx.authToken.create({ data: { ...tokenData(u.id), expiresAt: new Date(Date.now() + 3_600_000), createdAt: new Date() } });
+      await tx.user.delete({ where: { id: u.id } });
+      expect(await tx.session.count({ where: { userId: u.id } })).toBe(0);
+      expect(await tx.authToken.count({ where: { userId: u.id } })).toBe(0);
+    });
+  });
+
+  it("rejects tokens that expire before they are created and negative rate-limit counts", async () => {
+    await expect(
+      rolledBack(async (tx) => {
+        const u = await user(tx);
+        await tx.authToken.create({ data: tokenData(u.id, { createdAt: hours(5), expiresAt: hours(1) }) });
+      }),
+    ).rejects.toThrow(/auth_tokens_expiry_chk/);
+    await expect(
+      rolledBack(async (tx) => {
+        await tx.rateLimit.create({ data: { key: uniq(), windowStart: new Date(), count: -1 } });
+      }),
+    ).rejects.toThrow(/rate_limits_count_chk/);
+  });
+
+  it("allows only one live verification token and one live reset token per user, but any number of used ones", async () => {
+    await expect(
+      rolledBack(async (tx) => {
+        const u = await user(tx);
+        await tx.authToken.create({ data: tokenData(u.id) });
+        await tx.authToken.create({ data: tokenData(u.id) });
+      }),
+    ).rejects.toThrow(/auth_tokens_one_live_per_type_idx/);
+
+    await rolledBack(async (tx) => {
+      const u = await user(tx);
+      await tx.authToken.create({ data: tokenData(u.id, { usedAt: hours(0) }) });
+      await tx.authToken.create({ data: tokenData(u.id, { usedAt: hours(0) }) });
+      await tx.authToken.create({ data: tokenData(u.id) }); // one live EMAIL_VERIFY
+      await tx.authToken.create({ data: tokenData(u.id, { type: "PASSWORD_RESET" }) }); // one live PASSWORD_RESET
+      expect(await tx.authToken.count({ where: { userId: u.id } })).toBe(4);
+    });
+  });
+});

@@ -16,9 +16,18 @@
 - Event and member content come from the API; empty states shown honestly when there is no data. No fabricated events.
 - Tests: axe checks, visual checks at 360/768/1024/1440, keyboard navigation.
 
-## Milestone 4 — Authentication
+## Milestone 4 — Authentication and authorization (implemented)
 
-Endpoints: register, verify-email, login, refresh, logout, forgot-password, reset-password, me. Rate limits, lockout/backoff, generic error messages to prevent account enumeration. Tests for expired/reused tokens, role escalation attempts, CSRF.
+Design and security model: [authentication.md](../architecture/authentication.md). API: [auth-and-admin-api.md](../api/auth-and-admin-api.md). Results and limitations: [milestone-4-report.md](milestone-4-report.md).
+
+Delivered as planned: register, verify-email, resend, login, logout, forgot-password, reset-password, me; server-side sessions; role/permission matrix; admin user API; rate limiting; CSRF; enumeration resistance; tests for expired/reused/concurrent tokens, role escalation and CSRF.
+
+Deviations from the original plan:
+- **No `refresh` endpoint.** Sessions are server-side with sliding idle expiry, so there is no refresh token to rotate.
+- **Rate limiting is database-backed** (Postgres) instead of an in-memory or Redis limiter, to work across instances without new infrastructure.
+- **No lockout or exponential backoff.** Fixed-window rate limits per account and per IP are used; permanent lockout would let an attacker lock real users out.
+- **Added** a first-administrator bootstrap command (`npm run admin:grant`), the admin user-management API, a role-gated area for each role, and a stricter "email link only opens a page; a button press consumes it" verification flow.
+- **Deferred** (carried to later milestones): change-password for signed-in users, MFA, scheduled cleanup, CSP, periodic session rotation.
 
 ## Milestone 5 — Events & registration
 

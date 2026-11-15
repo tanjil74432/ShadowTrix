@@ -16,7 +16,7 @@ Criteria: stable, open-source, well-supported, portable, no mandatory paid servi
 | Database | PostgreSQL 17 | Relational integrity, transactions, partial indexes, CHECK constraints |
 | ORM | Prisma 7.10.1 + `@prisma/adapter-pg` | Typed client, versioned migrations. Pinned to stable 7.x; npm's `latest` CLI tag currently points to an 8.0 release candidate, which we deliberately avoid |
 | Validation | Zod 4 | One schema language for env config, API input, forms |
-| Auth | Self-managed (Milestone 4): Argon2id, hashed single-use tokens, httpOnly cookie sessions, RBAC | No third-party dependency or cost |
+| Auth | Self-managed, implemented in Milestone 4: Argon2id (`@node-rs/argon2`), server-side sessions in Postgres, single-use hashed tokens, role guards | No third-party dependency or cost; real revocation. Rationale and threat model: [authentication.md](authentication.md) |
 | Email | Nodemailer 10 over SMTP; Mailpit locally | Provider-agnostic |
 | Certificates | pdf-lib 1.17 | Pure JS, no external service |
 | Storage | Driver switch: `local` or `s3` (any S3-compatible), via env | Portable; storage interface lands with file uploads (Milestone 7) |
