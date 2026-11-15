@@ -7,7 +7,8 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: [["list"]],
+  // In CI the "github" reporter turns failures into annotations that are visible on the run without log access.
+  reporter: process.env.CI ? [["list"], ["github"]] : [["list"]],
   use: {
     baseURL: `http://localhost:${PORT}`,
     // Locally use the installed Microsoft Edge (no browser download). CI installs Playwright's Chromium.
