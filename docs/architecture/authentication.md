@@ -36,6 +36,11 @@ Users register with email and password, confirm the address through an emailed s
 
 **Password reset:** `forgot-password` always answers the same; if an active account exists a 60-minute single-use link is emailed. `reset-password` consumes the token, sets the new hash, marks the email verified (the link proves mailbox control), revokes **every** session, voids other outstanding links, writes an audit entry and sends a "password changed" notice.
 
+## Password policy and multi-factor authentication
+
+- **Passwords:** 12 to 128 characters (owner-approved minimum of 12), not on the common-password list, not containing the part of the email before the `@`, not one repeated character. No composition rules (they push people to predictable patterns); spaces and Unicode are allowed and length is counted in characters. The limits live in one constant (`web/src/lib/password-policy.ts`) shared by the server validation and the form hints, and apply to registration and password reset. A change-password flow does not exist yet; when it is added it must use the same schema.
+- **MFA:** policy is that administrator MFA will be **optional** and must never block an administrator who has not enrolled. It is **not implemented yet**; see [../planning/security-backlog.md](../planning/security-backlog.md).
+
 ## Sessions
 
 | Property | Value |
@@ -88,7 +93,7 @@ Administrator safeguards (`admin-users.service.ts`): cannot demote or suspend yo
 1. **No periodic session-token rotation** for a live session; rotation happens at login, password reset and suspension.
 2. **No scheduled cleanup.** `purgeDeadSessions` and `purgeExpiredRateLimits` exist but nothing runs them yet; expired rows are harmless but accumulate. Unverified accounts are not auto-expired.
 3. **Pre-registration risk is reduced, not eliminated.** If an attacker registers a victim's address with the attacker's password and the victim clicks the confirmation link anyway, the attacker's password is live. Mitigations: a newer registration replaces an unverified one, and the email says to ignore it if unexpected.
-4. **No change-password screen for signed-in users, no email change, no multi-factor authentication, no social login, no "sign out other devices" screen.** Password reset covers recovery; the rest is planned work.
+4. **No change-password screen for signed-in users, no email change, no multi-factor authentication (optional for admins by policy, not built), no social login, no "sign out other devices" screen.** Password reset covers recovery; the rest is planned work.
 5. **Content-Security-Policy is not set yet** (needs a nonce strategy); scheduled for the hardening milestone.
 6. **IP-based limits depend on `TRUST_PROXY`.** Route handlers cannot see the socket address, so without a trusted proxy only the per-account limits apply.
 7. **The header is session-aware, so pages are no longer served as fully static, CDN-cacheable HTML** (`Cache-Control: private, no-store`). The prerendered shell still makes them fast; a CDN would not cache them.

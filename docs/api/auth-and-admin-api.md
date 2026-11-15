@@ -13,7 +13,7 @@ Base path `/api/v1`. JSON in, JSON out. Design notes: [../architecture/authentic
 { "error": { "code": "invalid_credentials", "message": "Incorrect email or password." } }
 ```
 
-Validation errors add `issues: [{ "path": ["password"], "message": "Use at least 10 characters." }]`.
+Validation errors add `issues: [{ "path": ["password"], "message": "Use at least 12 characters." }]`.
 
 | Status | Meaning |
 |---|---|
@@ -29,7 +29,7 @@ Validation errors add `issues: [{ "path": ["password"], "message": "Use at least
 
 | Method and path | Body | Success | Notes |
 |---|---|---|---|
-| `POST /auth/register` | `{ email, fullName, password }` | `202 { status, message }` | Same response for new, unverified and existing addresses. Password: 10 to 128 characters, not common, not containing the email name. |
+| `POST /auth/register` | `{ email, fullName, password }` | `202 { status, message }` | Same response for new, unverified and existing addresses. Password: 12 to 128 characters, not common, not containing the email name. |
 | `POST /auth/verify-email` | `{ token }` | `200 { status: "ok" }` | Token is single use and valid 24 hours. |
 | `POST /auth/resend-verification` | `{ email }` | `202` | Same response for every address. |
 | `POST /auth/login` | `{ email, password }` | `200 { user: { id, email, fullName } }` + `Set-Cookie` | The session token is only in the cookie, never in the body. 403 `email_not_verified` / `account_suspended` appear only after a correct password. |

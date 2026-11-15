@@ -91,9 +91,17 @@ Other notes: GitHub reports that the `actions/checkout@v4` and `actions/setup-no
 
 1. **Open and merge the pull requests**, M3 first, then M4 (I will not merge into `develop` or `main`).
 2. **Who is the first administrator?** Register that account on a running instance, confirm the email, then run `npm run admin:grant -- <email>` (or tell me to do it for a development account).
-3. **Policy choices to confirm:** 30-day absolute / 7-day idle sessions; password minimum of 10 characters; 8 login attempts per 15 minutes per account. All are one-line settings.
+3. **Policy choices to confirm:** 30-day absolute / 7-day idle sessions; 8 login attempts per 15 minutes per account. (The password minimum was 10 here and has since been set to 12 by the owner; see the follow-up below.) All are one-line settings.
 4. **Pre-registration hardening:** to remove the residual risk completely, accounts could set their password only after confirming the email. It changes the signup flow, so I did not do it without your decision.
 5. **Before Milestone 5:** do you want change-password for signed-in users and MFA first, or carried forward as listed?
 6. **An independent security review** (and penetration test) before any real user data is handled.
 7. **Deployment:** `TRUST_PROXY` and `APP_URL` depend on the hosting choice (still open).
 8. **Milestone 5 has not been started** and will wait for your review.
+
+---
+
+## Follow-up: owner decisions and policy update (after this report)
+
+Confirmed by the owner: the first administrator will be **the owner's own account** (email not yet supplied; no admin has been granted, `admin:grant` has not been run, no default credentials exist); **admin MFA will be optional**, never mandatory (not yet implemented); **minimum password length is 12 characters**; merging M3 and M4 and granting the admin role each require explicit approval.
+
+Implemented since: the 12-character minimum, from one shared constant (`web/src/lib/password-policy.ts`) used by the server validation, the registration and reset forms and their hints. It applies to registration and password reset; there is no change-password flow yet, so none could be updated. Maximum length (128), the common-password list, the email-name check and Argon2id settings are unchanged. Tests: 19 password unit tests (boundary 11 rejected / 12 accepted, multi-byte counting, registration and reset schemas) and 3 new Playwright tests (API and real forms, including the reset flow). Prioritized remaining work: [security-backlog.md](security-backlog.md).
