@@ -169,13 +169,12 @@ test.describe("structure, SEO and audit requirements", () => {
       window.scrollTo(0, document.body.scrollHeight); // ensure the very bottom (footer) is reached
       await new Promise((r) => setTimeout(r, 200));
     });
-    await page.waitForLoadState("networkidle");
-    const imgs = await page.$$eval("img", (els) => els.map((i) => ({ alt: i.getAttribute("alt"), ok: i.complete && i.naturalWidth > 0, src: i.currentSrc })));
-    expect(imgs.length).toBeGreaterThan(0);
-    for (const i of imgs) {
-      expect(i.alt, i.src).not.toBeNull();
-      expect(i.ok, i.src).toBe(true);
-    }
+    const state = () =>
+      page.$$eval("img", (els) => els.map((i) => ({ alt: i.getAttribute("alt"), ok: i.complete && i.naturalWidth > 0, src: i.currentSrc })));
+    expect((await state()).length).toBeGreaterThan(0);
+    // Wait for the condition rather than sampling once: lazy images finish loading a moment after they are scrolled into view.
+    await expect.poll(async () => (await state()).filter((i) => !i.ok).map((i) => i.src), { timeout: 15_000 }).toEqual([]);
+    for (const i of await state()) expect(i.alt, i.src).not.toBeNull();
   });
 });
 
