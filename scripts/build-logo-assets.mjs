@@ -115,7 +115,21 @@ const entries = imgs.map((img, i) => {
 const ico = Buffer.concat([header, ...entries, ...imgs]);
 await writeFile(path.join(OUT, "favicon.ico"), ico);
 
+// social share card (Open Graph / Twitter): the unmodified mark centered on pure black, 1200x630
+const markForCard = await sharp(cropped).resize(520, 520, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } }).toBuffer();
+const card = await sharp({ create: { width: 1200, height: 630, channels: 3, background: "#000000" } })
+  .composite([{ input: markForCard, gravity: "center" }])
+  .png()
+  .toBuffer();
+await writeFile(path.join(OUT, "social-card-1200x630.png"), card);
+
 // copy what the web app serves
+await copyFile(path.join(OUT, "icon-192.png"), path.join(WEB_PUBLIC, "icon-192.png"));
+await copyFile(path.join(OUT, "icon-512.png"), path.join(WEB_PUBLIC, "icon-512.png"));
+await writeFile(path.join(WEB_APP, "opengraph-image.png"), card);
+await writeFile(path.join(WEB_APP, "twitter-image.png"), card);
+await writeFile(path.join(WEB_APP, "opengraph-image.alt.txt"), "ShadowTrix logo: a network globe inside a hexagon, on a black background");
+await writeFile(path.join(WEB_APP, "twitter-image.alt.txt"), "ShadowTrix logo: a network globe inside a hexagon, on a black background");
 await copyFile(path.join(OUT, "logo-mark-transparent.png"), path.join(WEB_PUBLIC, "logo-mark.png"));
 await copyFile(path.join(OUT, "favicon.ico"), path.join(WEB_APP, "favicon.ico"));
 await copyFile(path.join(OUT, "icon-512.png"), path.join(WEB_APP, "icon.png"));

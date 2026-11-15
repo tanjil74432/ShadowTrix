@@ -1,5 +1,25 @@
 # Reference Analysis: Forkship (https://www.forkship.tech/)
 
+> **Update (Milestone 3):** The owner supplied the audit findings in the Milestone 3 brief. They are mapped to ShadowTrix implementation and tests in the table directly below. The original analysis follows unchanged.
+
+## Audit findings and how ShadowTrix addresses them
+
+| Audit finding | ShadowTrix implementation | Verified by |
+|---|---|---|
+| Animated hero heading duplicates text for screen readers and crawlers | `AnimatedHeadline`: CSS-only word reveal; text exists once; selectable; works without JS | e2e: text occurs once in `innerText`, no `aria-hidden` or `sr-only` duplicate, `user-select` not none |
+| Three competing hero CTAs | Hero has exactly two links: "Explore Events" (primary), "Join ShadowTrix" (secondary). Login and Register are in the header | e2e: hero link count and labels; no login or member-portal link in hero |
+| Neon lime and dark green palette hurts contrast | Black, white, silver, gray only; one functional error color | Token contrast unit tests; axe at 4 breakpoints |
+| Excessive tracked uppercase slogans, decorative type | Sentence-case Geist, no letter-spaced caps | Design review; `SectionHeading` eyebrow is plain case |
+| Spelling mistakes, broken URLs, awkward copy, emojis | Copy reviewed; no emojis; every internal link is a real route | e2e crawls every internal homepage link and expects 200 |
+| Incorrect or confusing event dates; duration vs registration timeline | Five labeled phases per event; explicit time zones; one status function | Unit tests for status and formatting; timeline component |
+| Useful four-pillar structure (Learn, Build, Collaborate, Share) | Used as inspiration: "How it works" steps plus the organization section pillars, with original copy | Design review |
+| Focus areas as an unstructured tag list | Four technology-domain groups (AI and Data, Software and Web, Systems and Security, Emerging Tech), each linking to a filter slug | Design review |
+| Leadership cards unclear | ProfileCard: photo, name, designation, term; hierarchy and team list | Component tests via axe and screenshots |
+| Missing own team structure | Leadership Board, Core, Technical, Event Management, Marketing and Creative teams listed | Homepage preview |
+| Metadata, semantics, accessibility | Open Graph and Twitter metadata, JSON-LD, skip link, landmarks, reduced motion, keyboard-operable menus, responsive images via `next/image`, fixed aspect ratios | e2e metadata, landmarks, keyboard and focus tests |
+
+---
+
 Purpose: learn from Forkship's content organization and quality bar. Nothing here is to be copied (code, assets, branding, exact layouts).
 
 **Source note:** Based on a fetch of the live homepage text on 2026-11-15. The separate "supplied design audit" mentioned in the brief was not attached to the conversation, so the audit-derived items below come from the brief's summary list and from what was observable in the fetched text. Visual properties (fonts, colors, contrast ratios, animation) could not be measured from text alone and need a browser-based review once the audit is supplied.

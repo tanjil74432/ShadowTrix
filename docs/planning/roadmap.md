@@ -6,7 +6,7 @@ Each milestone ends with: tests passing, docs updated, completion criteria met. 
 |---|---|---|---|---|
 | 1 | Workspace & documentation | Folder structure, logo preserved, README, planning docs, reference analysis | Files exist; logo hash matches original | **Done** |
 | 2 | Architecture & schema | Approve stack, finalize schema, scaffold app, CI, Docker Compose | Stack approved; migrations run on clean DB; checks pass locally | **Done locally** (CI workflow written, not yet run on GitHub: no remote/repo yet) |
-| 3 | Design system & homepage | Tokens, base components, homepage incl. leadership preview | Lighthouse a11y ≥ 90; responsive at 4 breakpoints; reduced-motion respected | Planned |
+| 3 | Design system & homepage | Tokens, base components, homepage incl. leadership preview | Axe clean at 4 breakpoints; reduced-motion respected; contrast tested | **Done locally** on `feature/milestone-3-design-system` (awaiting PR review) |
 | 4 | Authentication | Register, login/logout, verify email, reset, RBAC | Auth tests incl. abuse cases; role guards on all routes | Planned |
 | 5 | Event discovery & registration | Explore, details, filters, register, capacity | Capacity race test passes; status logic unit-tested | Planned |
 | 6 | Dashboards | Participant and organizer dashboards, announcements | E2E: create event → register → announce | Planned |
