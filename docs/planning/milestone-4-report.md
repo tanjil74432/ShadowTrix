@@ -59,7 +59,7 @@ Issues found and fixed **during** this work (not hidden):
 | Production build | pass | no runtime errors in server log |
 | `npm audit` | production: **0 vulnerabilities**; all: 7 moderate, all in dev-only ESLint tooling | |
 | Linux Chromium (Playwright Docker image, CI conditions) | M3 suite 24 / 24 pass | used to investigate the Milestone 3 CI failure |
-| **GitHub Actions on this branch** | **PENDING_CI_RESULT** | |
+| **GitHub Actions on this branch** | **success** (run on `75af64b`): all 15 steps pass, including fresh-database migrations, drift check, 213 unit/integration tests, production build, 63 Playwright tests against a Mailpit service container (Linux Chromium), and the dependency audit | warnings only: GitHub's Node 20 action deprecation notice |
 
 Test-count breakdown by file: admin-users 12, auth-password 11, auth-security-units 19, auth-service 36, authz 11 (expands to 55 matrix cases), db-integrity 18, design-tokens 4 (expands to 20), env 8, event-logic 10, grant-admin 3.
 
