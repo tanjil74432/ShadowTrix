@@ -1,0 +1,662 @@
+// ShadowTrix database schema. See docs/architecture/database-design.md.
+// Conventions: UUIDv7 ids, createdAt/updatedAt on mutable tables, snake_case table names.
+// Extra integrity rules that Prisma cannot express (CHECK constraints) live in the
+// migration SQL (see prisma/migrations/*_integrity_checks).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────── Enums ─────────────────────────
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum RoleKey {
+  PARTICIPANT
+  TEAM_LEADER // contextual (derived from TeamMember.role); kept for completeness
+  ORGANIZER
+  JUDGE
+  ADMIN
+}
+
+enum AuthTokenType {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+  REFRESH
+}
+
+enum OrganizationType {
+  PLATFORM_OPERATOR
+  UNIVERSITY
+  COMMUNITY
+  COMPANY
+  OTHER
+}
+
+enum HostRole {
+  HOST
+  CO_HOST
+  PARTNER
+}
+
+enum EventCategory {
+  HACKATHON
+  DATATHON
+  AI_ML
+  PROGRAMMING_CONTEST
+  WORKSHOP
+  SUMMIT
+  INNOVATION_CHALLENGE
+  OTHER
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  ARCHIVED
+}
+
+enum RegistrationMode {
+  INDIVIDUAL
+  TEAM
+}
+
+enum LocationType {
+  ONLINE
+  ONSITE
+  HYBRID
+}
+
+enum RegistrationStatus {
+  PENDING
+  CONFIRMED
+  WAITLISTED
+  CANCELLED
+}
+
+enum TeamMemberRole {
+  LEADER
+  MEMBER
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  REVOKED
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  SCORED
+  DISQUALIFIED
+}
+
+enum AwardType {
+  WINNER
+  RUNNER_UP
+  FINALIST
+  NONE
+}
+
+enum CertificateType {
+  PARTICIPATION
+  FINALIST
+  WINNER
+}
+
+enum MemberStatus {
+  ACTIVE
+  FORMER
+}
+
+enum Visibility {
+  DRAFT
+  PUBLISHED
+}
+
+// ───────────────────── Identity & access ─────────────────────
+
+model User {
+  id              String     @id @default(uuid(7)) @db.Uuid
+  email           String     @unique // stored lower-cased (enforced by CHECK)
+  passwordHash    String     @map("password_hash")
+  fullName        String     @map("full_name")
+  avatarUrl       String?    @map("avatar_url")
+  bio             String?
+  emailVerifiedAt DateTime?  @map("email_verified_at") @db.Timestamptz(3)
+  status          UserStatus @default(ACTIVE)
+  lastLoginAt     DateTime?  @map("last_login_at") @db.Timestamptz(3)
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  roles            UserRoleAssignment[]
+  authTokens       AuthToken[]
+  auditLogs        AuditLog[]
+  organizerOf      EventOrganizer[]
+  registrations    Registration[]
+  teamsLed         Team[]               @relation("TeamLeader")
+  teamMemberships  TeamMember[]
+  invitationsSent  TeamInvitation[]     @relation("InvitationInviter")
+  invitationsRecv  TeamInvitation[]     @relation("InvitationInvitee")
+  submissions      Submission[]
+  judgeAssignments JudgeAssignment[]
+  scores           Score[]
+  certificates     Certificate[]
+  announcements    Announcement[]
+  createdEvents    Event[]              @relation("EventCreator")
+  orgMember        OrgMember?
+
+  @@map("users")
+}
+
+/// Global or scoped role grant. eventId / organizationId null = platform-wide.
+model UserRoleAssignment {
+  id             String  @id @default(uuid(7)) @db.Uuid
+  userId         String  @map("user_id") @db.Uuid
+  role           RoleKey
+  eventId        String? @map("event_id") @db.Uuid
+  organizationId String? @map("organization_id") @db.Uuid
+  grantedById    String? @map("granted_by_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event        Event?        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // NULLs are distinct in Postgres, so a partial unique index for the
+  // global case is added in the integrity migration.
+  @@unique([userId, role, eventId, organizationId])
+  @@index([userId])
+  @@map("user_roles")
+}
+
+model AuthToken {
+  id        String        @id @default(uuid(7)) @db.Uuid
+  userId    String        @map("user_id") @db.Uuid
+  type      AuthTokenType
+  tokenHash String        @unique @map("token_hash") // SHA-256 of the token; raw token is never stored
+  expiresAt DateTime      @map("expires_at") @db.Timestamptz(3)
+  usedAt    DateTime?     @map("used_at") @db.Timestamptz(3)
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@index([expiresAt])
+  @@map("auth_tokens")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  actorId    String?  @map("actor_id") @db.Uuid
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  before     Json?
+  after      Json?
+  ip         String?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+  @@map("audit_logs")
+}
+
+model SiteSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("site_settings")
+}
+
+// ───────────── Organizations (hosts) — NOT multi-tenancy ─────────────
+// Single-operator platform (Team EU Shadow). This table lets events record who
+// hosts/co-hosts/partners without scoping data per tenant. No row-level tenancy.
+
+model Organization {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  slug        String           @unique
+  name        String
+  type        OrganizationType @default(OTHER)
+  description String?
+  websiteUrl  String?          @map("website_url")
+  logoUrl     String?          @map("logo_url")
+  isOperator  Boolean          @default(false) @map("is_operator") // exactly one true (partial unique index)
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  eventHosts EventHost[]
+  roles      UserRoleAssignment[]
+
+  @@map("organizations")
+}
+
+// ───────────────────────── Events ─────────────────────────
+
+model Event {
+  id                   String           @id @default(uuid(7)) @db.Uuid
+  slug                 String           @unique
+  title                String
+  category             EventCategory
+  summary              String
+  description          String
+  coverImageUrl        String?          @map("cover_image_url")
+  status               EventStatus      @default(DRAFT)
+  startsAt             DateTime         @map("starts_at") @db.Timestamptz(3)
+  endsAt               DateTime         @map("ends_at") @db.Timestamptz(3)
+  registrationOpensAt  DateTime         @map("registration_opens_at") @db.Timestamptz(3)
+  registrationClosesAt DateTime         @map("registration_closes_at") @db.Timestamptz(3)
+  submissionDeadline   DateTime?        @map("submission_deadline") @db.Timestamptz(3)
+  registrationManuallyClosed Boolean    @default(false) @map("registration_manually_closed")
+  capacity             Int?
+  registrationMode     RegistrationMode @default(INDIVIDUAL) @map("registration_mode")
+  minTeamSize          Int?             @map("min_team_size")
+  maxTeamSize          Int?             @map("max_team_size")
+  eligibility          String?
+  locationType         LocationType     @default(ONLINE) @map("location_type")
+  location             String?
+  timezone             String           @default("UTC")
+  resultsPublishedAt   DateTime?        @map("results_published_at") @db.Timestamptz(3)
+  createdById          String?          @map("created_by_id") @db.Uuid
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdBy     User?                @relation("EventCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  hosts         EventHost[]
+  organizers    EventOrganizer[]
+  schedule      EventScheduleItem[]
+  announcements Announcement[]
+  registrations Registration[]
+  teams         Team[]
+  submissions   Submission[]
+  criteria      JudgingCriterion[]
+  judges        JudgeAssignment[]
+  results       Result[]
+  certificates  Certificate[]
+  roleGrants    UserRoleAssignment[]
+  contributions OrgMemberContribution[]
+
+  @@index([status, startsAt])
+  @@index([category])
+  @@map("events")
+}
+
+model EventHost {
+  eventId        String   @map("event_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  role           HostRole @default(HOST)
+
+  event        Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@id([eventId, organizationId])
+  @@map("event_hosts")
+}
+
+model EventOrganizer {
+  eventId String  @map("event_id") @db.Uuid
+  userId  String  @map("user_id") @db.Uuid
+  isLead  Boolean @default(false) @map("is_lead")
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, userId])
+  @@map("event_organizers")
+}
+
+model EventScheduleItem {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  eventId     String   @map("event_id") @db.Uuid
+  title       String
+  description String?
+  startsAt    DateTime @map("starts_at") @db.Timestamptz(3)
+  endsAt      DateTime? @map("ends_at") @db.Timestamptz(3)
+  sortOrder   Int      @default(0) @map("sort_order")
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, startsAt])
+  @@map("event_schedule_items")
+}
+
+model Announcement {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  eventId     String?   @map("event_id") @db.Uuid // null = platform-wide
+  authorId    String?   @map("author_id") @db.Uuid
+  title       String
+  body        String
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  event  Event? @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  author User?  @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([eventId, publishedAt])
+  @@map("announcements")
+}
+
+// ───────────────── Registration & participant teams ─────────────────
+
+model Team {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  eventId   String   @map("event_id") @db.Uuid
+  name      String
+  leaderId  String   @map("leader_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  event         Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  leader        User             @relation("TeamLeader", fields: [leaderId], references: [id], onDelete: Restrict)
+  members       TeamMember[]
+  invitations   TeamInvitation[]
+  registrations Registration[]
+  submission    Submission?
+
+  @@unique([eventId, name])
+  @@map("teams")
+}
+
+model TeamMember {
+  teamId   String         @map("team_id") @db.Uuid
+  userId   String         @map("user_id") @db.Uuid
+  role     TeamMemberRole @default(MEMBER)
+  joinedAt DateTime       @default(now()) @map("joined_at") @db.Timestamptz(3)
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+  @@index([userId])
+  @@map("team_members")
+}
+
+model TeamInvitation {
+  id           String           @id @default(uuid(7)) @db.Uuid
+  teamId       String           @map("team_id") @db.Uuid
+  inviterId    String           @map("inviter_id") @db.Uuid
+  inviteeId    String?          @map("invitee_id") @db.Uuid
+  inviteeEmail String           @map("invitee_email")
+  status       InvitationStatus @default(PENDING)
+  tokenHash    String           @unique @map("token_hash")
+  expiresAt    DateTime         @map("expires_at") @db.Timestamptz(3)
+  respondedAt  DateTime?        @map("responded_at") @db.Timestamptz(3)
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  team    Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  inviter User  @relation("InvitationInviter", fields: [inviterId], references: [id], onDelete: Cascade)
+  invitee User? @relation("InvitationInvitee", fields: [inviteeId], references: [id], onDelete: SetNull)
+
+  @@index([teamId, status])
+  @@index([inviteeEmail])
+  @@map("team_invitations")
+}
+
+model Registration {
+  id           String             @id @default(uuid(7)) @db.Uuid
+  eventId      String             @map("event_id") @db.Uuid
+  userId       String             @map("user_id") @db.Uuid
+  teamId       String?            @map("team_id") @db.Uuid
+  status       RegistrationStatus @default(PENDING)
+  registeredAt DateTime           @default(now()) @map("registered_at") @db.Timestamptz(3)
+  cancelledAt  DateTime?          @map("cancelled_at") @db.Timestamptz(3)
+  attended     Boolean            @default(false)
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team  Team? @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  @@unique([eventId, userId])
+  @@index([eventId, status])
+  @@index([userId])
+  @@map("registrations")
+}
+
+// ───────────────────── Submissions & judging ─────────────────────
+
+model Submission {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  eventId     String           @map("event_id") @db.Uuid
+  ownerId     String           @map("owner_id") @db.Uuid // submitting user (team leader for team events)
+  teamId      String?          @unique @map("team_id") @db.Uuid // one submission per team
+  title       String
+  description String
+  repoUrl     String?          @map("repo_url")
+  demoUrl     String?          @map("demo_url")
+  status      SubmissionStatus @default(DRAFT)
+  submittedAt DateTime?        @map("submitted_at") @db.Timestamptz(3)
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  event  Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  owner  User             @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  team   Team?            @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  files  SubmissionFile[]
+  scores Score[]
+  result Result?
+
+  @@unique([eventId, ownerId])
+  @@index([eventId, status])
+  @@map("submissions")
+}
+
+model SubmissionFile {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  submissionId String   @map("submission_id") @db.Uuid
+  storageKey   String   @unique @map("storage_key")
+  originalName String   @map("original_name")
+  mimeType     String   @map("mime_type")
+  sizeBytes    Int      @map("size_bytes")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+  @@map("submission_files")
+}
+
+model JudgingCriterion {
+  id          String  @id @default(uuid(7)) @db.Uuid
+  eventId     String  @map("event_id") @db.Uuid
+  name        String
+  description String?
+  maxScore    Decimal @map("max_score") @db.Decimal(6, 2)
+  weight      Decimal @default(1) @db.Decimal(6, 3)
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  event  Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  scores Score[]
+
+  @@unique([eventId, name])
+  @@map("judging_criteria")
+}
+
+model JudgeAssignment {
+  eventId   String   @map("event_id") @db.Uuid
+  judgeId   String   @map("judge_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  judge User  @relation(fields: [judgeId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, judgeId])
+  @@map("judge_assignments")
+}
+
+model Score {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  submissionId String   @map("submission_id") @db.Uuid
+  judgeId      String   @map("judge_id") @db.Uuid
+  criterionId  String   @map("criterion_id") @db.Uuid
+  score        Decimal  @db.Decimal(6, 2)
+  feedback     String?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  submission Submission       @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  judge      User             @relation(fields: [judgeId], references: [id], onDelete: Restrict)
+  criterion  JudgingCriterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, judgeId, criterionId])
+  @@index([judgeId])
+  @@map("scores")
+}
+
+model Result {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  eventId      String    @map("event_id") @db.Uuid
+  submissionId String    @unique @map("submission_id") @db.Uuid
+  finalScore   Decimal   @map("final_score") @db.Decimal(8, 3)
+  rank         Int?
+  award        AwardType @default(NONE)
+  publishedAt  DateTime? @map("published_at") @db.Timestamptz(3)
+
+  event      Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, rank])
+  @@map("results")
+}
+
+// ───────────────────────── Certificates ─────────────────────────
+
+model Certificate {
+  id         String          @id @default(uuid(7)) @db.Uuid
+  publicCode String          @unique @map("public_code") // non-guessable, shown on certificate + verify URL
+  eventId    String          @map("event_id") @db.Uuid
+  userId     String          @map("user_id") @db.Uuid
+  type       CertificateType
+  recipientName String       @map("recipient_name") // snapshot at issue time
+  issuedAt   DateTime        @default(now()) @map("issued_at") @db.Timestamptz(3)
+  revokedAt  DateTime?       @map("revoked_at") @db.Timestamptz(3)
+  storageKey String?         @map("storage_key")
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([eventId, userId, type])
+  @@index([userId])
+  @@map("certificates")
+}
+
+// ───────────── Organization & leadership (public "Our Team") ─────────────
+// Naming: "Org*" = the ShadowTrix organization's own people, distinct from
+// participant Teams above.
+
+model OrgUnit {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  slug         String   @unique
+  name         String
+  description  String?
+  displayOrder Int      @default(0) @map("display_order")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  memberships OrgMembership[]
+
+  @@map("org_units")
+}
+
+model Designation {
+  id        String  @id @default(uuid(7)) @db.Uuid
+  title     String  @unique
+  rankOrder Int     @default(1000) @map("rank_order") // lower = more senior; drives hierarchy display
+
+  memberships OrgMembership[]
+
+  @@map("designations")
+}
+
+model OrgTerm {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  label     String   @unique
+  startsOn  DateTime @map("starts_on") @db.Date
+  endsOn    DateTime? @map("ends_on") @db.Date
+  isCurrent Boolean  @default(false) @map("is_current") // at most one true (partial unique index)
+
+  memberships OrgMembership[]
+
+  @@map("org_terms")
+}
+
+model OrgMember {
+  id               String       @id @default(uuid(7)) @db.Uuid
+  slug             String       @unique
+  fullName         String       @map("full_name")
+  photoUrl         String?      @map("photo_url")
+  bio              String?
+  department       String?
+  linkedinUrl      String?      @map("linkedin_url")
+  githubUrl        String?      @map("github_url")
+  portfolioUrl     String?      @map("portfolio_url")
+  email            String?
+  emailPublic      Boolean      @default(false) @map("email_public") // email is only exposed when true
+  responsibilities String?
+  skills           String[]
+  status           MemberStatus @default(ACTIVE)
+  visibility       Visibility   @default(DRAFT)
+  isPlaceholder    Boolean      @default(true) @map("is_placeholder") // true until verified info is supplied
+  userId           String?      @unique @map("user_id") @db.Uuid
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user          User?                   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  memberships   OrgMembership[]
+  contributions OrgMemberContribution[]
+
+  @@map("org_members")
+}
+
+/// A member's position in a unit during a term. History is preserved; archiving
+/// a former board member sets isArchived/endedOn rather than deleting.
+model OrgMembership {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  memberId     String    @map("member_id") @db.Uuid
+  unitId       String    @map("unit_id") @db.Uuid
+  designationId String   @map("designation_id") @db.Uuid
+  termId       String?   @map("term_id") @db.Uuid
+  startedOn    DateTime? @map("started_on") @db.Date
+  endedOn      DateTime? @map("ended_on") @db.Date
+  displayOrder Int       @default(0) @map("display_order")
+  isArchived   Boolean   @default(false) @map("is_archived")
+
+  member      OrgMember   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  unit        OrgUnit     @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  designation Designation @relation(fields: [designationId], references: [id], onDelete: Restrict)
+  term        OrgTerm?    @relation(fields: [termId], references: [id], onDelete: SetNull)
+
+  @@unique([memberId, unitId, designationId, termId])
+  @@index([unitId, displayOrder])
+  @@index([memberId])
+  @@map("org_memberships")
+}
+
+model OrgMemberContribution {
+  id          String  @id @default(uuid(7)) @db.Uuid
+  memberId    String  @map("member_id") @db.Uuid
+  eventId     String? @map("event_id") @db.Uuid
+  description String
+
+  member OrgMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  event  Event?    @relation(fields: [eventId], references: [id], onDelete: SetNull)
+
+  @@index([memberId])
+  @@map("org_member_contributions")
+}
