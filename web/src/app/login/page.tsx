@@ -1,16 +1,31 @@
 import type { Metadata } from "next";
-import { ComingSoon } from "@/components/layout/coming-soon";
+import Link from "next/link";
+import { Suspense } from "react";
+import { AuthCard, FormSkeleton } from "@/components/auth/auth-card";
+import { GuestOnly } from "@/components/auth/guest-only";
+import { LoginForm } from "@/components/auth/login-form";
 
-export const metadata: Metadata = {
-  title: "Login",
-  robots: { index: false, follow: true },
-};
+export const metadata: Metadata = { title: "Log in", robots: { index: false, follow: false } };
 
-export default function Page() {
+export default function LoginPage() {
   return (
-    <ComingSoon
-      title="Login is coming soon"
-      description="Accounts are not available yet. Registration and sign-in will open in a later release."
-    />
+    <AuthCard
+      title="Log in"
+      description="Welcome back. Log in to manage your registrations and submissions."
+      footer={
+        <p>
+          New to ShadowTrix?{" "}
+          <Link href="/register" className="font-medium text-fg underline underline-offset-4">
+            Create an account
+          </Link>
+        </p>
+      }
+    >
+      <Suspense fallback={<FormSkeleton />}>
+        <GuestOnly>
+          <LoginForm />
+        </GuestOnly>
+      </Suspense>
+    </AuthCard>
   );
 }

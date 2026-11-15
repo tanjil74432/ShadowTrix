@@ -32,6 +32,11 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  {
+    // Playwright fixtures receive a callback named `use`; it is not a React hook.
+    files: ["e2e/**/*.ts"],
+    rules: { "react-hooks/rules-of-hooks": "off" },
+  },
 ]);
 
 export default eslintConfig;

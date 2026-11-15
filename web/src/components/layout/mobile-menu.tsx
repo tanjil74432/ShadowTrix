@@ -2,17 +2,28 @@
 
 import * as Dialog from "@radix-ui/react-dialog";
 import Link from "next/link";
-import { useState } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { CloseIcon, MenuIcon } from "@/components/ui/icons";
 import { nav, site } from "@/lib/site";
 
 const linkClass = "block rounded-md px-3 py-3 text-lg font-medium text-fg hover:bg-surface-raised";
 
-/** Full-height dialog menu for small screens. Radix provides focus trapping, Escape to close and focus return. */
-export function MobileMenu() {
+/**
+ * Full-height dialog menu for small screens. Radix provides focus trapping, Escape to close and focus return.
+ * `account` is server-rendered (it depends on the session) and passed in, so this client component never sees session data.
+ */
+export function MobileMenu({ account }: { account: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
   const close = () => setOpen(false);
+
+  // Any navigation (including links rendered by the server inside the account slot) closes the menu.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing UI with an external system (the URL)
+    setOpen(false);
+  }, [pathname]);
 
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
@@ -67,17 +78,15 @@ export function MobileMenu() {
             </ul>
           </nav>
 
-          <div className="mt-4 grid gap-3 border-t border-border pt-4">
-            <Button asChild variant="secondary" size="lg">
-              <Link href={nav.account.login.href} onClick={close}>
-                {nav.account.login.label}
-              </Link>
-            </Button>
-            <Button asChild size="lg">
-              <Link href={nav.account.register.href} onClick={close}>
-                {nav.account.register.label}
-              </Link>
-            </Button>
+          {/* Links here are rendered by the server and cannot call close(); closing on any link click also covers
+              "link to the page you are already on", where the URL (and so the effect above) does not change. */}
+          <div
+            className="mt-4 grid gap-3 border-t border-border pt-4"
+            onClick={(e) => {
+              if ((e.target as HTMLElement).closest("a")) close();
+            }}
+          >
+            {account}
           </div>
         </Dialog.Content>
       </Dialog.Portal>

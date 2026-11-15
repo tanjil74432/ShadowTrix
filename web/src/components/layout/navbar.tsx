@@ -1,15 +1,16 @@
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { Suspense } from "react";
 import { Container } from "@/components/ui/container";
 import { nav } from "@/lib/site";
 import { AboutMenu } from "./about-menu";
+import { AccountActions, MobileAccountActions } from "./account-actions";
 import { BrandLogo } from "./brand-logo";
 import { MobileMenu } from "./mobile-menu";
 import { NavLink } from "./nav-link";
 
 /**
- * Site header. One emphasized action (Register); Login is a quiet text link, so sign-in lives in the
- * navigation and not in the hero. Desktop shows inline links; below md the same links move into a dialog menu.
+ * Site header. One emphasized action; sign-in lives in the navigation, not in the hero. Desktop shows inline links;
+ * below md the same links move into a dialog menu. Everything that depends on the session streams in behind
+ * <Suspense>, so the rest of every page stays statically prerendered.
  */
 export function Navbar() {
   const [events, ...rest] = nav.primary;
@@ -29,13 +30,16 @@ export function Navbar() {
         </nav>
 
         <div className="flex items-center gap-2">
-          <NavLink href={nav.account.login.href} className="hidden md:inline-block">
-            {nav.account.login.label}
-          </NavLink>
-          <Button asChild size="sm" className="hidden md:inline-flex">
-            <Link href={nav.account.register.href}>{nav.account.register.label}</Link>
-          </Button>
-          <MobileMenu />
+          <Suspense fallback={<div aria-hidden className="h-9 w-24 md:w-40" />}>
+            <AccountActions />
+          </Suspense>
+          <MobileMenu
+            account={
+              <Suspense fallback={null}>
+                <MobileAccountActions />
+              </Suspense>
+            }
+          />
         </div>
       </Container>
     </header>
