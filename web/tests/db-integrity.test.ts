@@ -74,6 +74,27 @@ describe("database integrity", () => {
     );
   });
 
+  it("keeps the timeline ordered: submission -> judging -> results announcement", async () => {
+    const make = (over: Partial<Prisma.EventCreateInput>) => (tx: Tx) =>
+      tx.event.create({ data: eventData({ submissionDeadline: hours(140), ...over }) }).then(() => {});
+    // valid full timeline
+    await rolledBack(
+      make({ judgingStartsAt: hours(150), judgingEndsAt: hours(170), resultsAnnouncementAt: hours(180) }),
+    );
+    // judging window reversed
+    await expect(rolledBack(make({ judgingStartsAt: hours(170), judgingEndsAt: hours(150) }))).rejects.toThrow(
+      /events_judging_window_chk/,
+    );
+    // judging starts before the submission deadline
+    await expect(rolledBack(make({ judgingStartsAt: hours(130), judgingEndsAt: hours(170) }))).rejects.toThrow(
+      /events_judging_after_submission_chk/,
+    );
+    // results announced before judging ends
+    await expect(
+      rolledBack(make({ judgingStartsAt: hours(150), judgingEndsAt: hours(170), resultsAnnouncementAt: hours(160) })),
+    ).rejects.toThrow(/events_results_after_judging_chk/);
+  });
+
   it("rejects duplicate registrations for the same user and event", async () => {
     await expect(
       rolledBack(async (tx) => {
