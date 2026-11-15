@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
+import { PASSWORD_HINT } from "@/lib/password-policy";
 import { rateLimitMessage, sendJson, type ApiResult } from "./api";
 import { FormAlert, PasswordInput, ResultPanel } from "./form-parts";
 
@@ -61,7 +62,7 @@ export function ResetPasswordForm() {
         </FormAlert>
       )}
       {general && <FormAlert>{general}</FormAlert>}
-      <Field label="New password" required error={errors.password} hint="At least 10 characters. A few random words make a strong passphrase.">
+      <Field label="New password" required error={errors.password} hint={PASSWORD_HINT}>
         {(p) => <PasswordInput {...p} name="password" autoComplete="new-password" />}
       </Field>
       <Button type="submit" size="lg" className="w-full" disabled={pending} aria-disabled={pending}>

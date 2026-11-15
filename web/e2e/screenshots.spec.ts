@@ -23,7 +23,7 @@ test("account screens", async ({ page, users }) => {
   await page.getByLabel(/^Email address/).fill("not-an-email");
   await page.getByLabel(/^Password/).fill("short");
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page.getByText("Use at least 10 characters.")).toBeVisible();
+  await expect(page.getByText("Use at least 12 characters.")).toBeVisible();
   await shot("register-errors-desktop");
 
   await page.goto("/forgot-password");

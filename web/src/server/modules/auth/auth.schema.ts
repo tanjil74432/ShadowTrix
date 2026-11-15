@@ -1,16 +1,18 @@
 import { z } from "zod";
+import { PASSWORD_MAX, PASSWORD_MIN } from "@/lib/password-policy";
 import { normalizeEmail } from "@/server/security/tokens";
 
-/** The few passwords people actually choose. Not exhaustive: a length rule plus this list blocks the worst cases. */
+/**
+ * The few passwords people actually choose. Not exhaustive: the length rule plus this list blocks the worst cases.
+ * Entries shorter than the minimum are kept out on purpose (the length rule already rejects them).
+ */
 const COMMON_PASSWORDS = new Set([
-  "password", "password1", "password12", "password123", "passw0rd", "123456789", "1234567890", "12345678910",
-  "qwertyuiop", "qwerty123", "qwertyuiop123", "1q2w3e4r5t", "iloveyou123", "letmein123", "welcome123",
-  "administrator", "adminadmin", "admin12345", "changeme123", "abc1234567", "111111111111", "000000000000",
-  "shadowtrix", "shadowtrix1", "shadowtrix123", "teameushadow",
+  "administrator", "adminadmin123", "changeme1234", "password1234", "passwordpassword", "password12345",
+  "123456789012", "1234567890123", "111111111111", "000000000000", "qwertyuiop12", "qwertyuiop123",
+  "iloveyou1234", "welcome12345", "letmein123456", "shadowtrix123", "shadowtrix1234", "teameushadow",
 ]);
 
-export const PASSWORD_MIN = 10;
-export const PASSWORD_MAX = 128;
+export { PASSWORD_MAX, PASSWORD_MIN };
 
 export function passwordIssues(password: string, email?: string): string | null {
   if (password.length < PASSWORD_MIN) return `Use at least ${PASSWORD_MIN} characters.`;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ARGON2_PARAMS, burnPasswordVerification, hashPassword, needsRehash, verifyPassword } from "@/server/modules/auth/password";
+import { PASSWORD_HINT, PASSWORD_MAX, PASSWORD_MIN } from "@/lib/password-policy";
 import { loginSchema, passwordIssues, registerSchema, resetPasswordSchema } from "@/server/modules/auth/auth.schema";
 
 describe("password hashing (Argon2id)", () => {
@@ -44,11 +45,32 @@ describe("password hashing (Argon2id)", () => {
 
 describe("password policy", () => {
   it.each([
-    ["short", "Use at least 10 characters."],
-    ["password123", "That password is too common. Try a longer passphrase."],
+    ["short", "Use at least 12 characters."],
+    ["administrator", "That password is too common. Try a longer passphrase."],
     ["aaaaaaaaaaaa", "Do not repeat a single character."],
   ])("rejects %s", (pw, message) => {
     expect(passwordIssues(pw)).toBe(message);
+  });
+
+  it("enforces the approved minimum of exactly 12 characters", () => {
+    expect(PASSWORD_MIN).toBe(12);
+    const eleven = "pq7-lmn-x2z"; // 11 characters, not common, not repeated
+    const twelve = "pq7-lmn-x2zk"; // 12 characters
+    expect(eleven).toHaveLength(11);
+    expect(twelve).toHaveLength(12);
+    expect(passwordIssues(eleven)).toBe("Use at least 12 characters.");
+    expect(passwordIssues(twelve)).toBeNull();
+    // the previous minimum (10) is no longer enough
+    expect(passwordIssues("abcdefghij")).toBe("Use at least 12 characters.");
+  });
+
+  it("counts characters, not bytes: 12 multi-byte characters pass, 11 do not", () => {
+    const eleven = "九州山川海空風雨雪月星";
+    const twelve = `${eleven}日`;
+    expect(eleven).toHaveLength(11);
+    expect(twelve).toHaveLength(12);
+    expect(passwordIssues(eleven)).toBe("Use at least 12 characters.");
+    expect(passwordIssues(twelve)).toBeNull();
   });
 
   it("rejects passwords containing the email name and over-long passwords", () => {
@@ -82,6 +104,28 @@ describe("auth input schemas", () => {
   it("never discloses password rules at login, only that a value is required", () => {
     expect(loginSchema.safeParse({ email: "a@b.co", password: "x" }).success).toBe(true);
     expect(loginSchema.safeParse({ email: "a@b.co", password: "" }).success).toBe(false);
+  });
+
+  it("registration enforces the 12-character minimum: 11 rejected on the password field, 12 accepted", () => {
+    const base = { email: "ada@example.com", fullName: "Ada Lovelace" };
+    const eleven = registerSchema.safeParse({ ...base, password: "pq7-lmn-x2z" });
+    expect(eleven.success).toBe(false);
+    expect(eleven.error!.issues).toEqual([expect.objectContaining({ path: ["password"], message: "Use at least 12 characters." })]);
+    expect(registerSchema.safeParse({ ...base, password: "pq7-lmn-x2zk" }).success).toBe(true);
+  });
+
+  it("password reset enforces the same minimum: 11 rejected, 12 accepted", () => {
+    const token = "t".repeat(43);
+    const eleven = resetPasswordSchema.safeParse({ token, password: "pq7-lmn-x2z" });
+    expect(eleven.success).toBe(false);
+    expect(eleven.error!.issues).toEqual([expect.objectContaining({ path: ["password"], message: "Use at least 12 characters." })]);
+    expect(resetPasswordSchema.safeParse({ token, password: "pq7-lmn-x2zk" }).success).toBe(true);
+  });
+
+  it("the browser hint and the server limit come from one constant", () => {
+    expect(PASSWORD_HINT).toContain(`${PASSWORD_MIN} characters`);
+    expect(PASSWORD_MIN).toBe(12);
+    expect(PASSWORD_MAX).toBe(128);
   });
 
   it("applies the password policy to resets and bounds the token length", () => {

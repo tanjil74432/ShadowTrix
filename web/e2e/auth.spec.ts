@@ -132,7 +132,7 @@ test.describe("registration, verification and login", () => {
     await page.getByRole("button", { name: "Create account" }).click();
     const field = page.getByLabel(/^Password/);
     await expect(field).toHaveAttribute("aria-invalid", "true");
-    await expect(page.getByText("Use at least 10 characters.")).toBeVisible();
+    await expect(page.getByText("Use at least 12 characters.")).toBeVisible();
     await page.getByLabel(/^Email address/).fill("not-an-email");
     await page.getByRole("button", { name: "Create account" }).click();
     await expect(page.getByText(/name@example.com/)).toBeVisible();
@@ -168,7 +168,7 @@ test.describe("password reset", () => {
     await page.goto(link);
     await page.getByLabel(/^New password/).fill("short");
     await page.getByRole("button", { name: "Change password" }).click();
-    await expect(page.getByText("Use at least 10 characters.")).toBeVisible();
+    await expect(page.getByText("Use at least 12 characters.")).toBeVisible();
     await page.getByLabel(/^New password/).fill(NEW_PASSWORD);
     await page.getByRole("button", { name: "Change password" }).click();
     await expect(page.getByRole("heading", { name: "Password changed" })).toBeVisible();
@@ -608,6 +608,64 @@ test.describe("account enumeration and brute force", () => {
     const reg: number[] = [];
     for (let i = 0; i < 6; i++) reg.push((await post(request, "/api/v1/auth/register", { email, fullName: "Flood Person", password: PASSWORD })).status());
     expect(reg).toEqual([202, 202, 202, 202, 202, 429]);
+  });
+});
+
+// ───────────────────────────── Password policy (12 characters) ─────────────────────────────
+
+test.describe("password policy: minimum 12 characters", () => {
+  const ELEVEN = "pq7-lmn-x2z";
+  const TWELVE = "pq7-lmn-x2zk";
+
+  test("registration API rejects 11 characters on the password field and accepts 12", async ({ request, users }) => {
+    const rejected = await post(request, "/api/v1/auth/register", { email: uniqueEmail("p11"), fullName: "Policy Person", password: ELEVEN });
+    expect(rejected.status()).toBe(400);
+    const body = await rejected.json();
+    expect(body.error.issues).toEqual([{ path: ["password"], message: "Use at least 12 characters." }]);
+
+    const email = uniqueEmail("p12");
+    users.track(email);
+    expect((await post(request, "/api/v1/auth/register", { email, fullName: "Policy Person", password: TWELVE })).status()).toBe(202);
+  });
+
+  test("registration form shows the 12-character rule from the server and then succeeds with 12", async ({ page, users }) => {
+    const email = uniqueEmail("pform");
+    users.track(email);
+    await page.goto("/register");
+    await expect(page.getByText("At least 12 characters.")).toBeVisible(); // the hint matches the server rule
+    await page.getByLabel(/^Full name/).fill("Policy Person");
+    await page.getByLabel(/^Email address/).fill(email);
+    await page.getByLabel(/^Password/).fill(ELEVEN);
+    await page.getByRole("button", { name: "Create account" }).click();
+    await expect(page.getByLabel(/^Password/)).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByText("Use at least 12 characters.")).toBeVisible();
+    await page.getByLabel(/^Password/).fill(TWELVE);
+    await page.getByRole("button", { name: "Create account" }).click();
+    await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+  });
+
+  test("password reset enforces the same rule, checked before the token is consumed", async ({ request, page, users }) => {
+    // API: the policy is validated first, so even a bogus token gets the policy error for 11 characters,
+    // and a token error (not a policy error) for 12.
+    const short = await post(request, "/api/v1/auth/reset-password", { token: "A".repeat(43), password: ELEVEN });
+    expect(short.status()).toBe(400);
+    expect((await short.json()).error.code).toBe("validation_error");
+    const ok = await post(request, "/api/v1/auth/reset-password", { token: "A".repeat(43), password: TWELVE });
+    expect(ok.status()).toBe(400);
+    expect((await ok.json()).error.code).toBe("invalid_token");
+
+    // Real flow: an 11-character password is refused and leaves the link usable; 12 then works.
+    const u = await users.create();
+    await post(request, "/api/v1/auth/forgot-password", { email: u.email });
+    const mail = await waitForMail(u.email, /Reset your ShadowTrix password/);
+    await page.goto(mail.link("reset-password"));
+    await page.getByLabel(/^New password/).fill(ELEVEN);
+    await page.getByRole("button", { name: "Change password" }).click();
+    await expect(page.getByText("Use at least 12 characters.")).toBeVisible();
+    await page.getByLabel(/^New password/).fill(TWELVE);
+    await page.getByRole("button", { name: "Change password" }).click();
+    await expect(page.getByRole("heading", { name: "Password changed" })).toBeVisible();
+    expect((await post(request, "/api/v1/auth/login", { email: u.email, password: TWELVE })).status()).toBe(200);
   });
 });
 

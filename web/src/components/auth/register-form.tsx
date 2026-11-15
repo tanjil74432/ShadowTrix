@@ -5,6 +5,7 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { Spinner } from "@/components/ui/skeleton";
+import { PASSWORD_HINT } from "@/lib/password-policy";
 import { rateLimitMessage, sendJson, type ApiResult } from "./api";
 import { FormAlert, PasswordInput, ResultPanel } from "./form-parts";
 
@@ -56,7 +57,7 @@ export function RegisterForm() {
       <Field label="Email address" required error={errors.email}>
         {(p) => <Input {...p} name="email" type="email" autoComplete="email" inputMode="email" />}
       </Field>
-      <Field label="Password" required error={errors.password} hint="At least 10 characters. A few random words make a strong passphrase.">
+      <Field label="Password" required error={errors.password} hint={PASSWORD_HINT}>
         {(p) => <PasswordInput {...p} name="password" autoComplete="new-password" />}
       </Field>
       <Button type="submit" size="lg" className="w-full" disabled={pending} aria-disabled={pending}>
