@@ -40,7 +40,8 @@ export function Navbar() {
         </nav>
 
         <div className="flex items-center gap-2">
-          <Suspense fallback={<div aria-hidden className="h-9 w-24 md:w-40" />}>
+          {/* The placeholder reserves space only where the account actions exist (desktop); on phones they are in the menu, so nothing may be reserved there or the header overflows while it streams in. */}
+          <Suspense fallback={<div aria-hidden className="hidden h-9 w-40 md:block" />}>
             <AccountActions />
           </Suspense>
           <Suspense fallback={<div aria-hidden className="size-10 md:hidden" />}>

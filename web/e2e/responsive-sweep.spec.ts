@@ -67,7 +67,10 @@ test("every important page is clean at every width, for every role", async ({ pa
           broken: [...document.images].filter((i) => i.complete && i.naturalWidth === 0 && !i.closest("[hidden]")).map((i) => i.currentSrc.split("/").pop()),
           clipped: [...document.querySelectorAll("h1,h2,h3")].filter((h) => { const r = h.getBoundingClientRect(); return r.width > 0 && (r.right > window.innerWidth + 1 || r.left < -1); }).map((h) => (h.textContent ?? "").slice(0, 30)),
         }));
-        if (m.overflow > 0) problems.push(`${where}: horizontal overflow ${m.overflow}px`);
+        if (m.overflow > 0) {
+          const culprit = await page.evaluate(() => [...document.querySelectorAll("body *")].map((e) => ({ tag: e.tagName.toLowerCase(), cls: (e.getAttribute("class") ?? "").slice(0, 50), right: Math.round(e.getBoundingClientRect().right) })).filter((x) => x.right > innerWidth + 0.5).slice(0, 3));
+          problems.push(`${where}: horizontal overflow ${m.overflow}px, widest elements: ${JSON.stringify(culprit)}`);
+        }
         if (m.broken.length) problems.push(`${where}: broken image(s) ${m.broken.join(",")}`);
         if (m.clipped.length) problems.push(`${where}: heading(s) outside the viewport: ${m.clipped.join(" | ")}`);
         // a few screenshots for human review (not every page, to keep the run bounded)
@@ -96,4 +99,28 @@ test("reduced motion: staggered entrances never keep content invisible (no anima
   const n = await cards.count();
   expect(n).toBeGreaterThanOrEqual(5);
   expect(Number(await cards.nth(n - 1).evaluate((el) => getComputedStyle(el).opacity))).toBe(1);
+});
+
+test("no horizontal overflow in ANY frame while the page streams in (the header placeholder bug)", async ({ page }) => {
+  // Watches every animation frame from the first paint, so an element that is only wide during loading (a streaming placeholder) is caught
+  // however fast or slow the machine is.
+  await page.addInitScript(() => {
+    (window as unknown as { __maxOverflow: number }).__maxOverflow = 0;
+    const tick = () => {
+      const ov = document.documentElement.scrollWidth - window.innerWidth;
+      const w = window as unknown as { __maxOverflow: number };
+      if (ov > w.__maxOverflow) w.__maxOverflow = ov;
+      if (performance.now() < 2500) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  for (const width of [320, 340]) {
+    await page.setViewportSize({ width, height: 640 });
+    for (const url of ["/login", "/register", "/forgot-password", "/events", "/"]) {
+      await page.goto(url, { waitUntil: "commit" });
+      await page.waitForTimeout(2600);
+      const max = await page.evaluate(() => (window as unknown as { __maxOverflow: number }).__maxOverflow);
+      expect(max, `${url} @${width}: widest transient overflow`).toBeLessThanOrEqual(0);
+    }
+  }
 });
