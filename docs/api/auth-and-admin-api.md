@@ -5,7 +5,7 @@ Base path `/api/v1`. JSON in, JSON out. Events, registrations and profile endpoi
 ## Conventions
 
 - **Authentication:** an HttpOnly session cookie set by `POST /auth/login`. There are no bearer tokens.
-- **State-changing requests** (`POST`, `PUT`, `PATCH`, `DELETE`) must carry an `Origin` header equal to the site's own origin (browsers send it automatically; non-browser clients must add it) or `Sec-Fetch-Site: same-origin`. Otherwise: `403 csrf_check_failed`. `POST`/`PUT`/`PATCH` must also send `Content-Type: application/json`, otherwise `415 unsupported_media_type`.
+- **State-changing requests** (`POST`, `PUT`, `PATCH`, `DELETE`) must carry an `Origin` header equal to the site's own origin (browsers send it automatically; non-browser clients must add it) or `Sec-Fetch-Site: same-origin`. Otherwise: `403 csrf_check_failed`. `POST`/`PUT`/`PATCH` must also send `Content-Type: application/json`, otherwise `415 unsupported_media_type`. **Two multipart upload endpoints are the exception** (`POST /api/v1/admin/members/{id}/photo`, `POST /api/v1/events/{id}/my-submission/files`): the order is origin (403), authentication (401), authorization (403), then content type (`415`, `multipart/form-data` with a boundary), then size, parsing and file validation (411/413/400). An anonymous caller therefore always gets 401 whatever body it sends, and a signed-in caller with the wrong content type still gets 415.
 - **Responses** are never cached (`Cache-Control: no-store`).
 - **Errors** share one shape and never include stack traces or internals:
 

@@ -57,7 +57,9 @@ export function createS3Storage(cfg: S3Config): Storage {
 
   return {
     async put(key, bytes) {
-      const res = await signedFetch(urlFor(key), { method: "PUT", body: bytes as BodyInit, headers: { "Content-Type": "application/octet-stream" } });
+      // Content-Length is declared explicitly: inside Next.js the patched fetch turns the body into a stream, which is sent without a length,
+      // and Backblaze then answers 411 MissingContentLength (found by the real-bucket browser test; invisible with a mock or outside Next).
+      const res = await signedFetch(urlFor(key), { method: "PUT", body: bytes as BodyInit, headers: { "Content-Type": "application/octet-stream", "Content-Length": String(bytes.byteLength) } });
       if (!res.ok) throw await failure("put", res);
     },
     async get(key) {

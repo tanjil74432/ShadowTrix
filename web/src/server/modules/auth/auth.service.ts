@@ -6,6 +6,7 @@ import { getDb } from "@/server/db/client";
 import { AppError } from "@/server/http/errors";
 import { log } from "@/server/logging/logger";
 import { writeAudit } from "@/server/modules/audit/audit.service";
+import { assertEmailReady, describeMailError, getEmailStatus, type EmailStatus } from "@/server/modules/email/email-config";
 import { smtpMailer, type Mail, type Mailer } from "@/server/modules/email/mailer";
 import {
   alreadyRegisteredEmail,
@@ -32,7 +33,12 @@ export interface AuthDeps {
   schedule: (task: () => Promise<void>) => void;
   now: () => Date;
   sessionLimits?: Partial<SessionLimits>;
+  /** Tests inject a readiness verdict; by default it is derived from the environment. */
+  emailStatus?: () => EmailStatus;
 }
+
+/** Requests that must send mail are refused up front (503) when the deployment cannot deliver it, before any account or token is created. */
+export const ensureEmailReady = (deps: AuthDeps) => assertEmailReady(deps.emailStatus ? deps.emailStatus() : getEmailStatus());
 
 export interface RequestContext {
   ip: string | null;
@@ -45,7 +51,12 @@ export function defaultDeps(): AuthDeps {
     now: () => new Date(),
     schedule: (task) => {
       const run = () =>
-        task().catch((err) => log.error("auth.email_failed", err));
+        task().catch(async (err) => {
+          // Never the message (it can echo server replies or addresses): only a short code. The audit row makes a broken mail setup visible to administrators.
+          const info = describeMailError(err);
+          log.error("auth.email_failed", undefined, info);
+          await writeAudit({ actorId: null, action: "email.delivery_failed", entityType: "system", entityId: "email", after: info }).catch(() => undefined);
+        });
       try {
         after(run);
       } catch {
@@ -113,6 +124,7 @@ function queueMail(deps: AuthDeps, mail: Mail) {
  *  - verified existing   -> an "you already have an account" email to the real owner; nothing changes
  */
 export async function registerUser(input: RegisterInput, ctx: RequestContext, deps: AuthDeps = defaultDeps()): Promise<void> {
+  ensureEmailReady(deps);
   // Administrators can pause new sign-ups (platform setting). Existing accounts and logins are unaffected.
   if (!(await getSignupsEnabled())) throw new AppError(503, "signups_paused", "New registrations are paused for now. Please try again later.");
   await enforceRateLimits(
@@ -200,6 +212,7 @@ export async function completeRegistration(input: CompleteRegistrationInput, ctx
 
 /** Always succeeds from the caller's point of view; an email is sent only if there is an unverified, active account. */
 export async function resendVerification(email: string, ctx: RequestContext, deps: AuthDeps = defaultDeps()): Promise<void> {
+  ensureEmailReady(deps);
   await enforceRateLimits(
     [
       { scope: "resend:email", id: email, policy: POLICIES.resendEmail },
@@ -319,6 +332,7 @@ export async function changePassword(
 
 /** Always succeeds from the caller's point of view; never reveals whether the address has an account. */
 export async function requestPasswordReset(email: string, ctx: RequestContext, deps: AuthDeps = defaultDeps()): Promise<void> {
+  ensureEmailReady(deps);
   await enforceRateLimits(
     [
       { scope: "forgot:email", id: email, policy: POLICIES.forgotEmail },

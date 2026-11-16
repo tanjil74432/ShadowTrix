@@ -44,6 +44,10 @@ const schema = z
     S3_SECRET_ACCESS_KEY: z.string().optional(),
   })
   .superRefine((env, ctx) => {
+    // Half a login is a configuration mistake in any environment: the provider would reject every message.
+    if (Boolean(env.SMTP_USER) !== Boolean(env.SMTP_PASSWORD)) {
+      ctx.addIssue({ code: "custom", path: [env.SMTP_USER ? "SMTP_PASSWORD" : "SMTP_USER"], message: "SMTP_USER and SMTP_PASSWORD must be set together (or both left empty)" });
+    }
     if (env.STORAGE_DRIVER === "s3") {
       for (const key of ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"] as const) {
         if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: `${key} is required when STORAGE_DRIVER=s3` });

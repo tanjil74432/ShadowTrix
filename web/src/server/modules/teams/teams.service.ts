@@ -5,7 +5,7 @@ import { getDb } from "@/server/db/client";
 import { drainStorageDeletionsBestEffort } from "@/server/modules/maintenance/storage-deletion.service";
 import { AppError, conflict, forbidden, notFound } from "@/server/http/errors";
 import { writeAudit } from "@/server/modules/audit/audit.service";
-import { defaultDeps, type AuthDeps } from "@/server/modules/auth/auth.service";
+import { defaultDeps, ensureEmailReady, type AuthDeps } from "@/server/modules/auth/auth.service";
 import type { Actor } from "@/server/modules/authz/permissions";
 import { teamInvitationEmail } from "@/server/modules/email/templates";
 import { BLOCK_MESSAGE, placeFor, registrationBlock } from "@/server/modules/events/event-lifecycle";
@@ -140,6 +140,7 @@ const link = (path: string, token: string) => {
  * already in another team is only discovered (and refused) when the invitation is answered.
  */
 export async function inviteMember(actor: Actor, teamId: string, email: string, deps: AuthDeps = defaultDeps()) {
+  ensureEmailReady(deps);
   const now = deps.now();
   await enforceRateLimits([{ scope: "team-invite:team", id: teamId, policy: { limit: 20, windowSeconds: 3600 } }], now);
   const result = await getDb().$transaction(async (tx) => {

@@ -23,7 +23,7 @@ export default defineConfig({
   globalSetup: "./e2e/global-cleanup.ts",
   globalTeardown: "./e2e/global-cleanup.ts",
   workers: 1,
-  timeout: 180_000,
+  timeout: 420_000,
   expect: { timeout: 30_000 },
   reporter: [["list"]],
   use: { baseURL: ORIGIN, trace: "retain-on-failure", channel: process.env.CI ? undefined : "msedge" },

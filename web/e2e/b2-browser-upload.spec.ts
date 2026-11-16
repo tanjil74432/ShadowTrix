@@ -22,19 +22,22 @@ let cached: ReturnType<typeof makeCtx> | null = null;
 const b2 = () => (cached ??= makeCtx());
 const PDF = Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n% real browser upload test\n");
 
-const head = async (key: string) => (await b2().client.fetch(`${b2().base}/${key}`, { method: "HEAD" })).status;
+const head = async (key: string) => (await b2().client.fetch(`${b2().base}/${key}`, { method: "HEAD", signal: AbortSignal.timeout(30_000) })).status;
 const versionCount = async (key: string) => {
-  const r = await b2().client.fetch(`${b2().base}?versions&prefix=${encodeURIComponent(key)}`);
+  const r = await b2().client.fetch(`${b2().base}?versions&prefix=${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(30_000) });
   return [...(await r.text()).matchAll(/<(Version|DeleteMarker)>/g)].length;
 };
 const purge = async (key: string) => {
   // test hygiene only: delete every version of exactly this test object
-  const xml = await (await b2().client.fetch(`${b2().base}?versions&prefix=${encodeURIComponent(key)}`)).text();
+  const xml = await (await b2().client.fetch(`${b2().base}?versions&prefix=${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(30_000) })).text();
   for (const m of xml.matchAll(/<(Version|DeleteMarker)>([\s\S]*?)<\/\1>/g)) {
     const k = /<Key>([^<]+)<\/Key>/.exec(m[2])?.[1], v = /<VersionId>([^<]+)<\/VersionId>/.exec(m[2])?.[1];
     if (k === key && v) await b2().client.fetch(`${b2().base}/${k}?versionId=${encodeURIComponent(v)}`, { method: "DELETE" });
   }
 };
+
+/** Raw requests to the bucket get a hard timeout, so a stalled connection fails loudly instead of consuming the whole test budget. */
+const tfetch = (input: string | URL, init: RequestInit = {}) => fetch(input, { ...init, signal: AbortSignal.timeout(30_000) });
 
 test("a real browser uploads to the private bucket; the attached object is immutable; downloads redirect; the outbox deletes every version", async ({ page, users, request }) => {
   const organizer = await users.create({ roles: ["ORGANIZER"] });
@@ -66,7 +69,6 @@ test("a real browser uploads to the private bucket; the attached object is immut
       expect(page.getByText("File uploaded.")).toBeVisible({ timeout: 60_000 }),
       failure.waitFor({ timeout: 60_000 }).then(() => { throw new Error(`The browser upload failed (${problems.join(" | ") || "no console detail"}). The bucket's CORS rule is missing or does not allow this origin.`); }),
     ]);
-
     const file = await db().submissionFile.findFirstOrThrow({ where: { submission: { eventId: event.id } }, include: { submission: true } });
     key = file.storageKey;
     expect(key).toMatch(/^submissions\/[0-9a-f-]{36}\/[0-9a-f-]{36}$/);
@@ -77,19 +79,23 @@ test("a real browser uploads to the private bucket; the attached object is immut
     expect(problems, "no CSP or CORS console errors").toEqual([]);
 
     // privacy: an unsigned request to the bucket is refused, and a stranger cannot get a download link
-    expect([401, 403]).toContain((await fetch(`${b2().base}/${key}`)).status);
+    expect([401, 403]).toContain((await tfetch(`${b2().base}/${key}`)).status);
     const downloadPath = `/api/v1/submissions/${file.submissionId}/files/${file.id}`;
+    await page.context().clearCookies(); // /login redirects a signed-in user away, so end the owner session first
     await uiLogin(page, stranger, "/dashboard");
+    await page.waitForURL(/\/dashboard/);
     expect((await page.request.get(downloadPath, { maxRedirects: 0 })).status()).toBe(404);
 
     // the owner is redirected (307) to a short-lived signed URL on the bucket host that forces a download
+    await page.context().clearCookies();
     await uiLogin(page, owner, "/dashboard");
+    await page.waitForURL(/\/dashboard/);
     const redirect = await page.request.get(downloadPath, { maxRedirects: 0 });
     expect(redirect.status()).toBe(307);
     const location = new URL(redirect.headers()["location"]);
     expect(location.hostname).toBe(new URL(b2().endpoint).hostname);
     expect(location.searchParams.get("X-Amz-Expires")).toBe("60");
-    const dl = await fetch(location);
+    const dl = await tfetch(location);
     expect(dl.status).toBe(200);
     expect(dl.headers.get("content-disposition") ?? "").toMatch(/^attachment/);
     expect(Buffer.from(await dl.arrayBuffer()).equals(PDF)).toBe(true);
@@ -101,12 +107,12 @@ test("a real browser uploads to the private bucket; the attached object is immut
     tempKey = decodeURIComponent(new URL(putUrl).pathname.replace(`/${b2().env.S3_BUCKET}/`, ""));
     expect(tempKey).toMatch(/^incoming\//);
     expect(tempKey).not.toBe(key); // the attached key is a different, permanent key
-    const evil = Buffer.from(PDF.toString("latin1").replace("browser upload test", "TAMPERED upload tests")); // same length, still a PDF
+    const evil = Buffer.from(PDF.toString("latin1").replace("browser upload test", "TAMPERED upload ok!")); // same length, still a PDF
     expect(evil.length).toBe(PDF.length);
-    expect((await fetch(putUrl, { method: "PUT", headers: { "Content-Type": "application/pdf" }, body: evil })).status).toBe(200); // the URL still accepts a PUT
+    expect((await tfetch(putUrl, { method: "PUT", headers: { "Content-Type": "application/pdf" }, body: evil })).status).toBe(200); // the URL still accepts a PUT
     expect((await versionCount(tempKey)) >= 2).toBe(true);
     const again = await page.request.get(downloadPath, { maxRedirects: 0 });
-    const redownload = await fetch(new URL(again.headers()["location"]));
+    const redownload = await tfetch(new URL(again.headers()["location"]));
     expect(Buffer.from(await redownload.arrayBuffer()).equals(PDF)).toBe(true); // the attached file still serves the validated bytes
 
     // maintenance: the temporary object is deleted (with every version) by the protected endpoint once its URL has expired

@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID, createHash } from "node:crypto";
 import type { Prisma } from "@/generated/prisma/client";
 import { getEnv } from "@/server/config/env";
+import { log } from "@/server/logging/logger";
 import { getDb } from "@/server/db/client";
 import { AppError, conflict, forbidden, notFound } from "@/server/http/errors";
 import { writeAudit } from "@/server/modules/audit/audit.service";
@@ -264,7 +265,9 @@ export async function completeDirectUpload(actor: Actor, eventId: string, input:
   };
   try {
     await storage.put(finalKey, stored.bytes);
-  } catch {
+  } catch (e) {
+    // Operators need the reason, never the data: an S3Error message is only "<operation> failed (HTTP <status>, <code>)".
+    log.error("upload.copy_failed", undefined, { reason: e instanceof Error && e.name === "Error" && /^S3 \w[\w-]* failed \(HTTP \d{3}(, \w+)?\)$/.test(e.message) ? e.message : e instanceof Error ? e.name : "unknown" });
     await releaseFinal();
     throw new AppError(503, "storage_unavailable", "The file could not be stored. Please try again.");
   }

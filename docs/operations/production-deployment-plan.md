@@ -45,13 +45,19 @@ Free tiers are not unlimited: the weakest points are Hobby's commercial-use rule
 
 The browser PUTs the file straight to `https://s3.us-east-005.backblazeb2.com/shadowtrix/<key>?X-Amz-...` (signed for one key, one content type, one exact length, 15 minutes). That is a cross-origin request, so the bucket needs a CORS rule. Downloads are top-level navigations (a redirect to a 60-second signed URL), which need no CORS.
 
-The preflight (`OPTIONS`) the browser sends: `Access-Control-Request-Method: PUT`, `Access-Control-Request-Headers: content-type`, and the page `Origin`. Required B2 CORS rule (Backblaze console > Buckets > shadowtrix > CORS Rules > custom rule; field names as of this writing, confirm in the console):
+The preflight (`OPTIONS`) the browser sends: `Access-Control-Request-Method: PUT`, `Access-Control-Request-Headers: content-type`, and the page `Origin`.
+
+**Root cause (verified 2026-11-17).** The bucket had no usable CORS rule: the preflight from the production origin returned HTTP 403 with no `Access-Control-Allow-Origin`, so a real Chromium on the production site blocked the upload. S3 `PutBucketCors` cannot be used on this bucket once Native-API rules exist (Backblaze refuses it), so the rule is applied with the B2 Native API (`b2_update_bucket`, application key with `writeBuckets`). A console preset that had been applied earlier was replaced by the rule below.
+
+**Applied and verified on 2026-11-17.** The bucket is private (`allPrivate`) and carries exactly the rule below. Preflight results: production origin -> 200 with `Access-Control-Allow-Origin: https://shadow-trix-woad.vercel.app`; `https://evil.example` -> 403; `http://localhost:3012` -> 403 (it is added only temporarily for the local browser test and removed afterwards). A real Chromium uploaded a throwaway object from the production origin, and the real-bucket end-to-end spec (local app, real bucket, real Chromium) passes: upload, attach, private-access checks, signed-download redirect, immutability after tampering, outbox deletion of every version, and an empty bucket afterwards. **Not performed: the complete flow on the production site while signed in** (it needs a production account, which does not exist yet).
+
+Required rule (facts from Backblaze's CORS documentation: rule names are 6 to 63 letters, digits and hyphens and must not start with `b2-`; `allowedOrigins` takes full origins; `allowedHeaders` is optional and lowercase header names are safest; `maxAgeSeconds` is required and at most 86400; the S3 PUT operation is "S3 Put Object" in the console and `s3_put` in JSON):
 
 ```json
 [
   {
     "corsRuleName": "shadowtrix-browser-upload",
-    "allowedOrigins": ["https://<project>.vercel.app", "http://localhost:3010", "http://localhost:3012"],
+    "allowedOrigins": ["https://shadow-trix-woad.vercel.app"],
     "allowedOperations": ["s3_put"],
     "allowedHeaders": ["content-type"],
     "exposeHeaders": [],
@@ -60,11 +66,19 @@ The preflight (`OPTIONS`) the browser sends: `Access-Control-Request-Method: PUT
 ]
 ```
 
-Add the final production origin (exactly, with `https://` and no trailing slash). Keep the bucket **Private**. **CORS is NOT verified until a real browser upload succeeds**: `node scripts/b2-selftest.mts` reports preflight results as advisory, and `e2e/b2-browser-upload.spec.ts` (opt-in, run after the rule exists) performs a real Chromium upload through the real page.
+No wildcard origin is needed or wanted. For local browser testing add `http://localhost:3010` and `http://localhost:3012` to `allowedOrigins`. Add the production origin exactly (`https://`, no trailing slash); if the site later gets a custom domain, add that origin too. Keep the bucket **Private**. Rules created through the API or CLI may not appear in the web console.
+
+Verification, in this order: (1) `B2_BROWSER=1 npx playwright test --config=playwright.b2.config.ts` (local app, real bucket, real Chromium, needs the `localhost:3012` origin); (2) the production-origin probe (a throwaway object under `selftest/`, a real browser PUT from `https://shadow-trix-woad.vercel.app`, then cleanup). **CORS is "working" only when a real browser upload succeeds.**
 
 ## 6. Email
 
-Gmail 2-step verification on, an App Password created by the owner (16 characters, shown once), stored only in the host's environment settings as `SMTP_PASSWORD`. `SMTP_USER` and `EMAIL_FROM` are the Gmail address. Real delivery is verified only by a real registration on the live site.
+Gmail 2-step verification on, an App Password created by the owner (16 characters, shown once), stored only in the host's environment settings as `SMTP_PASSWORD`. `SMTP_USER` and `EMAIL_FROM` are the Gmail address.
+
+**Required production variables:** `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_SECURE=false`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_FROM`.
+
+**Behavior when they are missing (verified by tests, not by a real inbox).** On a public deployment, registration, verification resend, password reset and team invitations return `503 email_unavailable` with a generic message, create no account or token, and reveal no variable name; the sign-up and password-reset pages show that message. `/api/v1/health` reports `email: not_configured`. The server log names the missing variables (names only). A mail transport failure after the request was accepted is logged and audited (`email.delivery_failed`) with only a short error code, never a message, recipient or credential.
+
+**Owner action required:** set the three missing variables in Vercel (Production scope) and redeploy. **Pending:** real delivery to an inbox is verified only by a real registration on the live site after that.
 
 ## 7. Scheduling
 

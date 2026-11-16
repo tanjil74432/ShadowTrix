@@ -2,14 +2,14 @@
 
 Intended first administrator: the owner's account, **tanjilshaiket74432@gmail.com**.
 
-**Status (2026-11-15): not granted.** The account has not been registered, no administrator role exists, `npm run admin:grant` has never been run and no default credentials exist. The role is granted only after the owner's explicit confirmation at the moment of execution (step 5).
+**Status (2026-11-17): not granted.** In the PRODUCTION database (Neon) the account has not been registered, no administrator role exists, `npm run admin:grant` has never been run against it and no default credentials exist. The role is granted only after the owner's explicit confirmation at the moment of execution (step 5).
 
 ## Rules
 
 - The ShadowTrix account password is separate from the Gmail password. **Never give the Gmail password to anyone or to any tool.**
 - The assistant never invents, generates, requests or stores the ShadowTrix password. The owner types it into the website themselves.
 - No credentials appear in Git, logs, reports, screenshots or source code. `.env` is git-ignored.
-- Administrator MFA is optional by policy and not built yet; being an administrator without MFA is allowed.
+- Administrator MFA is optional by policy and is built (enable it in Account settings after the first login); being an administrator without MFA is allowed.
 
 ## Steps
 
@@ -37,7 +37,7 @@ SELECT email, email_verified_at IS NOT NULL AS verified, status FROM users WHERE
 Tell the assistant, in writing, that the account in step 3 is yours and that the administrator role may be granted now.
 
 ### 5. Grant (run only after step 4)
-From the `web` folder, with `DATABASE_URL` pointing at the target database:
+From the `web` folder, with `DATABASE_URL` pointing at the target database. **For production, `DATABASE_URL` must be the Neon direct connection string for that one command only** (the local `.env` points at the development database; `dotenv` never overrides a variable that is already set). Never paste the connection string into chat or Git.
 
 ```bash
 npm run admin:grant -- tanjilshaiket74432@gmail.com

@@ -45,6 +45,31 @@ export function assertMultipart(req: Request): void {
   }
 }
 
+const BODY_READERS = new Set(["formData", "arrayBuffer", "blob", "text", "json", "bytes"]);
+
+/**
+ * Multipart upload routes check their content type AFTER the handler has authenticated the caller (an anonymous caller must get 401 and
+ * learn nothing about the expected body format). This wrapper makes that safe by construction: the first attempt to read the body (any
+ * reader, or the raw stream) enforces the multipart contract, so a route can never parse an upload that was not multipart even if it
+ * forgets to call `assertMultipart` itself. Headers and everything else pass straight through.
+ */
+export function guardMultipartBody(req: Request): Request {
+  return new Proxy(req, {
+    get(target, prop) {
+      if (prop === "body") assertMultipart(target);
+      const value = Reflect.get(target, prop, target);
+      if (typeof value !== "function") return value;
+      if (typeof prop === "string" && BODY_READERS.has(prop)) {
+        return (...args: unknown[]) => {
+          assertMultipart(target);
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      }
+      return value.bind(target);
+    },
+  });
+}
+
 function csrfError() {
   return new AppError(403, "csrf_check_failed", "Cross-site request rejected");
 }

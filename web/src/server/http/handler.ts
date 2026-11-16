@@ -3,7 +3,7 @@ import { unstable_rethrow } from "next/navigation";
 import { ZodError, type ZodType } from "zod";
 import { getEnv } from "@/server/config/env";
 import { log } from "@/server/logging/logger";
-import { assertJsonContentType, assertMultipart, assertSameOrigin } from "@/server/security/csrf";
+import { assertJsonContentType, assertSameOrigin, guardMultipartBody } from "@/server/security/csrf";
 import { AppError, badRequest } from "./errors";
 
 type Handler = (req: Request, ctx: { params: Promise<Record<string, string>> }) => Promise<Response>;
@@ -13,7 +13,10 @@ const BASE_HEADERS = { "Cache-Control": "no-store", "X-Content-Type-Options": "n
 /**
  * Wraps a route handler with the platform's API rules:
  *  - state-changing methods get the CSRF origin check and must send JSON (opt out with { csrf: false } only for
- *    endpoints that are not cookie-authenticated and idempotent);
+ *    endpoints that are not cookie-authenticated and idempotent). Order for JSON endpoints: origin, content type, then the
+ *    handler's own authentication (a header-only check; no body is read before it);
+ *  - { multipart: true } upload endpoints: origin first, then the handler authenticates and authorizes, and only then is the
+ *    body's content type enforced (415) when the body is first read, so anonymous callers always get 401 (see guardMultipartBody);
  *  - uniform errors: validation -> 400, AppError -> its status (+ headers such as Retry-After), anything else -> a
  *    generic 500 whose details are logged (redacted) but never returned;
  *  - responses are never cached.
@@ -24,10 +27,9 @@ export function apiHandler(handler: Handler, options: { csrf?: boolean; multipar
     try {
       if (csrf) {
         assertSameOrigin(req, getEnv().APP_URL);
-        if (options.multipart) assertMultipart(req);
-        else assertJsonContentType(req);
+        if (!options.multipart) assertJsonContentType(req);
       }
-      const res = await handler(req, ctx);
+      const res = await handler(csrf && options.multipart ? guardMultipartBody(req) : req, ctx);
       for (const [k, v] of Object.entries(BASE_HEADERS)) if (!res.headers.has(k)) res.headers.set(k, v);
       return res;
     } catch (err) {

@@ -34,6 +34,15 @@ describe("S3 driver: signed requests", () => {
     expect(await req.arrayBuffer()).toHaveProperty("byteLength", 3);
   });
 
+  it("put declares its exact Content-Length (Next's patched fetch streams bodies, and Backblaze answers 411 MissingContentLength without it)", async () => {
+    const net = fakeNetwork(() => new Response(null, { status: 200 }));
+    const s = createS3Storage(cfg(net.fetchFn));
+    await s.put(KEY, new Uint8Array([1, 2, 3, 4, 5]));
+    expect(net.seen[0].headers.get("content-length")).toBe("5");
+    await s.put(`${KEY}x`, new Uint8Array(0).fill(0));
+    expect(net.seen[1].headers.get("content-length")).toBe("0");
+  });
+
   it("get returns bytes, and null for a missing object; remove tolerates a missing object", async () => {
     let status = 200;
     const net = fakeNetwork((req) => {
