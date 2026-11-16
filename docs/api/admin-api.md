@@ -60,4 +60,27 @@ Public side: `GET /api/v1/org-members/{id}/photo` serves a photo only for a **ve
 | `GET /audit` | `view` (`all`, `security`, `admin`), `action` (prefix), `entityType`, `actor` (name or email), `from`, `to` (`YYYY-MM-DD`), `page`, `pageSize` (max 100) | `200 { items[], total }` | `security` shows authentication, MFA, role, status and maintenance events. |
 | `GET /analytics` | `from`, `to` (`YYYY-MM-DD`, at most 366 days; default last 30 days) | `200` | Counts computed from the database: users (total, verified, suspended, new in range, active participants, by role), events (by status, by category), registrations (by status in range, individual vs team, per day), organizers, teams, submissions, judging completion, results published, certificates. `400 invalid_range` for reversed or over-long ranges. |
 | `GET /settings` | | `200` | Read-only configuration. **Never includes secrets** (only whether SMTP credentials and the cleanup secret are configured). |
-| `PATCH /settings` | `{ signupsEnabled: boolean }` | `200` | Pause or resume new account registration (`503 signups_paused` for registrants while paused; existing accounts are unaffected). Audited. |
+| `PATCH /settings` | `{ signupsEnabled?: boolean, eventApprovalRequired?: boolean }` (at least one) | `200` | Pause or resume new account registration (`503 signups_paused` for registrants while paused; existing accounts are unaffected). Audited. `eventApprovalRequired` makes organizers need an approved review before publishing (administrators are exempt). |
+
+## Administration consoles (added with the admin panel)
+
+All paths are under `/api/v1/admin`, require the platform `admin:access` permission (global ADMIN) and return `401` anonymous / `403` non-admin / `404` for a malformed id. State changes need the same-origin check and JSON, and are audited.
+
+| Method and path | Query / body | Success | Notes |
+|---|---|---|---|
+| `GET /overview` | | `200` | Real counts (users, events, organizations, teams, submissions, judging, results, certificates), alerts, ten recent audit events. |
+| `GET /event-reviews` | `review` (`SUBMITTED`, `APPROVED`, `CHANGES_REQUESTED`, `REJECTED`), `q`, `page`, `pageSize` | `200` | Default: every event that was ever submitted. |
+| `GET /event-reviews/{id}` | | `200` | Full event details, organizers (name and email), hosts, review history. |
+| `POST /event-reviews/{id}` | `{ decision: "approve" }` or `{ decision: "reject"\|"request_changes", reason }` (5 to 1000 characters) | `200` | `409` unless the event is `SUBMITTED`; decided once, atomically. Audit `event.review_*`. |
+| `POST /api/v1/events/{id}/review-request` | | `200` | Organizer of that event only: submit a draft for review. |
+| `GET /teams`, `/teams/{id}` | `q` (team, event, leader), `eventId`, `status`, paging | `200` | Names and roles only; invitation addresses are masked. |
+| `GET /submissions`, `/submissions/{id}` | `q`, `eventId`, `teamId`, `status`, `from`, `to`, paging | `200` | Never returns storage keys or hashes. Files download through the existing `GET /api/v1/submissions/{id}/files/{fileId}` (authorized on every request, 60-second signed link). Disqualify uses the existing `POST /api/v1/submissions/{id}/disqualify`. |
+| `GET /judging`, `/judging/{eventId}` | `q`, `incomplete=1`, paging | `200` | Read-only progress. No score is ever changed here. |
+| `GET /results`, `/results/{eventId}` | `q`, `published=yes\|no`, paging | `200` | Ranks with ties flagged. Publish and unpublish use the existing `POST /api/v1/events/{id}/results/publish` and `/unpublish` (reason required). |
+| `GET /certificates` | `q` (code, recipient, event, team), `type`, `status=issued\|revoked`, `eventId`, paging | `200` | Revoke uses the existing `POST /api/v1/certificates/{id}/revoke` (reason required); the public verification page keeps working and reports the revocation. |
+| `GET`, `POST /announcements` | list: `state`, paging; create: `{ title, body, audience, eventId? }` | `200` / `201 { id }` | New announcements are drafts. |
+| `GET`, `PUT`, `DELETE /announcements/{id}` | | `200` | Delete only a draft (`409` otherwise). |
+| `POST /announcements/{id}/publish` | `{ at?: ISO date-time }` | `200` | No `at` (or a past one) publishes now; a future `at` schedules it. |
+| `POST /announcements/{id}/unpublish` | | `200` | Back to draft. |
+| `GET /maintenance` | | `200` | Database, storage, email readiness (problems name variables, never values), scheduler, mode, history. |
+| `PUT /maintenance` | `{ enabled: boolean, message? }` (5 to 300 characters) | `200` | Read-only mode: while on, state-changing calls from the public return `503 maintenance` with `Retry-After`. Always allowed: `/api/v1/admin/*` and sign-in, sign-out, `me`, MFA. The scheduler endpoint is unaffected. |

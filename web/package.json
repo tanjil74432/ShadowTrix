@@ -19,7 +19,7 @@
     "db:studio": "prisma studio",
     "logo:build": "node ../scripts/build-logo-assets.mjs",
     "postinstall": "prisma generate",
-    "test:e2e": "playwright test --project=chromium",
+    "test:e2e": "playwright test --project=chromium --project=chromium-global-state",
     "test:e2e:cross": "playwright test --project=x-chromium-desktop --project=x-firefox-desktop --project=x-webkit-desktop --project=x-webkit-tablet --project=x-webkit-phone --project=x-chromium-phone",
     "admin:grant": "tsx prisma/grant-admin.ts",
     "admin:mfa-reset": "tsx prisma/mfa-reset.ts",

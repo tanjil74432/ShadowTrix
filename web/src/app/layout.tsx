@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import { Footer } from "@/components/layout/footer";
+import { MaintenanceBanner } from "@/components/layout/maintenance-banner";
 import { Navbar } from "@/components/layout/navbar";
 import { SkipLink } from "@/components/layout/skip-link";
 import { site } from "@/lib/site";
@@ -38,6 +40,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`}>
       <body className="flex min-h-dvh flex-col">
         <SkipLink />
+        <Suspense fallback={null}><MaintenanceBanner /></Suspense>
         <Navbar />
         <main id="main" tabIndex={-1} className="flex-1 outline-none">
           {children}

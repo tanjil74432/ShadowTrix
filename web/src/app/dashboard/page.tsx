@@ -15,6 +15,7 @@ import { requireUser } from "@/server/modules/auth/dal";
 import { listMyRegistrations } from "@/server/modules/events/registrations.service";
 import { listMyCertificates } from "@/server/modules/certificates/certificates.service";
 import { listMyInvitations, listMyTeams } from "@/server/modules/teams/teams.service";
+import { listVisibleAnnouncements } from "@/server/modules/admin/announcements.service";
 import { InvitationResponse } from "@/components/team/invitation-response";
 
 export const metadata: Metadata = { title: "My dashboard", robots: { index: false, follow: false } };
@@ -33,11 +34,12 @@ async function DashboardContent() {
   const user = await requireUser("/dashboard");
   await connection();
   const now = new Date();
-  const [mine, teams, invitations, certificates] = await Promise.all([
+  const [mine, teams, invitations, certificates, announcements] = await Promise.all([
     listMyRegistrations(user.id),
     listMyTeams(user.id),
     listMyInvitations({ email: user.email }, now),
     listMyCertificates(user.id),
+    listVisibleAnnouncements(user, now, 5),
   ]);
   const active = mine.filter((r) => r.status !== "CANCELLED");
   const upcoming = active.filter((r) => r.event.endsAt > now && r.event.status !== "CANCELLED").sort((a, b) => a.event.startsAt.getTime() - b.event.startsAt.getTime());
@@ -70,6 +72,21 @@ async function DashboardContent() {
           </Badge>
         ))}
       </div>
+
+      {announcements.length > 0 && (
+        <section aria-labelledby="ann-heading" className="mt-8">
+          <h2 id="ann-heading" className="text-h3 font-semibold">Announcements</h2>
+          <ul className="mt-3 space-y-3">
+            {announcements.map((a) => (
+              <li key={a.id} className="rounded-lg bg-surface p-4 shadow-card">
+                <p className="font-medium">{a.title}{a.event && <span className="ml-2 text-sm font-normal text-fg-subtle">{a.event.title}</span>}</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-fg-muted">{a.body}</p>
+                {a.publishedAt && <p className="mt-2 text-xs text-fg-subtle"><time dateTime={a.publishedAt.toISOString()}>{formatDateTime(a.publishedAt, "UTC")}</time></p>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <dl className="mt-10 grid gap-4 sm:grid-cols-3">
         {[

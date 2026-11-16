@@ -7,6 +7,8 @@ import { z } from "zod";
 import { ProtectedArea } from "@/components/auth/protected-area";
 import { EventForm, type EventFormValues } from "@/components/organizer/event-form";
 import { EventStatusControls } from "@/components/organizer/event-status-controls";
+import { ApiButton } from "@/components/common/api-button";
+import { REVIEW_LABEL } from "@/components/admin/review-labels";
 import { Badge } from "@/components/ui/badge";
 import { Container } from "@/components/ui/container";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -82,6 +84,14 @@ async function ManageContent({ id }: { id: string }) {
       <section aria-labelledby="status-heading" className="mt-10 space-y-4">
         <h2 id="status-heading" className="text-h3 font-semibold">Publishing</h2>
         <EventStatusControls eventId={event.id} status={event.status} registrationClosed={event.registrationManuallyClosed} />
+        {event.status === "DRAFT" && (
+          <div className="space-y-2 rounded-lg bg-surface p-4 shadow-card" role="group" aria-label="Administrator review">
+            <p className="text-sm"><span className="font-medium">Administrator review:</span> {REVIEW_LABEL[event.reviewStatus]}{event.reviewNote ? ` (${event.reviewNote})` : ""}</p>
+            {(event.reviewStatus === "NOT_SUBMITTED" || event.reviewStatus === "CHANGES_REQUESTED" || event.reviewStatus === "REJECTED") && (
+              <ApiButton url={`/api/v1/events/${event.id}/review-request`} variant="secondary">{event.reviewStatus === "NOT_SUBMITTED" ? "Submit for review" : "Resubmit for review"}</ApiButton>
+            )}
+          </div>
+        )}
       </section>
 
       <section aria-labelledby="regs-heading" className="mt-12">

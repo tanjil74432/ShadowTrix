@@ -8,6 +8,7 @@ import { canCreateEvents, canManageEvent, hasGlobalRole, type Actor } from "@/se
 import { teamIssues, timelineIssues, type CreateEventInput, type EventStatusAction, type UpdateEventInput } from "./event.schema";
 import { nextState, slugify } from "./event-lifecycle";
 import { confirmedSeats, lockEvent, promoteWaitlist } from "./registrations.service";
+import { getApprovalRequired } from "./approval-setting";
 
 type Tx = Prisma.TransactionClient;
 export interface Clock {
@@ -190,6 +191,9 @@ export async function setEventStatus(actor: Actor, eventId: string, action: Even
     const to = nextState(event.status, action);
     if (!to) throw conflict(`This event is ${event.status.toLowerCase()}, so it cannot be ${VERB[action]}.`);
     if (action === "publish" && event.registrationClosesAt <= clock.now()) throw conflict("Registration already closes in the past. Update the dates before publishing.");
+    if (action === "publish" && !hasGlobalRole(actor, "ADMIN") && event.reviewStatus !== "APPROVED" && (await getApprovalRequired(tx))) {
+      throw conflict("This event needs administrator approval before it can be published. Submit it for review first.");
+    }
     if (action === "unpublish") {
       const registered = await tx.registration.count({ where: { eventId, status: { in: ["CONFIRMED", "WAITLISTED", "PENDING"] } } });
       if (registered > 0) throw conflict("People are already registered, so the event cannot go back to draft. Cancel it instead.");

@@ -3,6 +3,7 @@ import { unstable_rethrow } from "next/navigation";
 import { ZodError, type ZodType } from "zod";
 import { getEnv } from "@/server/config/env";
 import { log } from "@/server/logging/logger";
+import { assertNotInMaintenance } from "@/server/modules/admin/maintenance.service";
 import { assertJsonContentType, assertSameOrigin, guardMultipartBody } from "@/server/security/csrf";
 import { AppError, badRequest } from "./errors";
 
@@ -28,6 +29,7 @@ export function apiHandler(handler: Handler, options: { csrf?: boolean; multipar
       if (csrf) {
         assertSameOrigin(req, getEnv().APP_URL);
         if (!options.multipart) assertJsonContentType(req);
+        await assertNotInMaintenance(req); // read-only mode pauses public writes (administrators and sign-in stay available)
       }
       const res = await handler(csrf && options.multipart ? guardMultipartBody(req) : req, ctx);
       for (const [k, v] of Object.entries(BASE_HEADERS)) if (!res.headers.has(k)) res.headers.set(k, v);

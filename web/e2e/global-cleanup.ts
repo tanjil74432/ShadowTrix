@@ -34,6 +34,8 @@ export default async function globalCleanup() {
   await client.organization.deleteMany({ where: { name: { startsWith: "E2E " }, eventHosts: { none: {} } } });
   await client.orgUnit.deleteMany({ where: { name: { startsWith: "E2E " } } });
   await client.designation.deleteMany({ where: { title: { startsWith: "E2E " } } });
+  await client.announcement.deleteMany({ where: { title: { startsWith: "E2E " } } });
+  await client.siteSetting.deleteMany({ where: { key: { in: ["maintenance_mode", "event_approval_required"] } } }); // e2e switches (never real: production data is not touched by tests)
   await client.rateLimit.deleteMany({});
   await rm(E2E_STORAGE_DIR, { recursive: true, force: true }); // files uploaded by the e2e server
   await client.$disconnect();

@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { requireUser } from "@/server/modules/auth/dal";
 const fallback = <Container className="py-14"><Skeleton className="h-96 w-full" /></Container>;
 import { ApiButton } from "@/components/common/api-button";
+import { getApprovalRequired } from "@/server/modules/events/approval-setting";
 import { getPlatformConfig } from "@/server/modules/admin/platform-config.service";
 
 export const metadata: Metadata = { title: "Settings", robots: { index: false, follow: false } };
@@ -19,6 +20,7 @@ async function Content() {
   const actor = await requireUser("/admin/settings");
   await connection();
   const c = await getPlatformConfig(actor);
+  const approvalRequired = await getApprovalRequired();
   const rows: [string, string][] = [
     ["Environment", c.environment], ["Public address (APP_URL)", c.appUrl], ["HTTPS", c.https ? "yes" : "no (acceptable only for local development)"], ["Trusting proxy headers (TRUST_PROXY)", c.trustProxy ? "yes" : "no"],
     ["Session lifetime", `${c.sessions.absoluteDays} days at most, ${c.sessions.idleDays} days idle`],
@@ -36,6 +38,11 @@ async function Content() {
         <h2 id="signups-heading" className="text-h3 font-semibold">New registrations</h2>
         <p role="status">New account registration is currently <strong>{c.signupsEnabled ? "open" : "paused"}</strong>. Existing accounts keep working either way.</p>
         <ApiButton url="/api/v1/admin/settings" method="PATCH" body={{ signupsEnabled: !c.signupsEnabled }} confirm={c.signupsEnabled ? "Pause new registrations?" : "Resume new registrations?"}>{c.signupsEnabled ? "Pause new registrations" : "Resume new registrations"}</ApiButton>
+      </section>
+      <section aria-labelledby="approval-heading" className="mt-6 max-w-2xl space-y-3 rounded-lg bg-surface p-5 shadow-card">
+        <h2 id="approval-heading" className="text-h3 font-semibold">Event approval</h2>
+        <p role="status">Organizers <strong>{approvalRequired ? "need" : "do not need"}</strong> administrator approval before publishing an event. Administrators can always publish. Events already published are not affected.</p>
+        <ApiButton url="/api/v1/admin/settings" method="PATCH" body={{ eventApprovalRequired: !approvalRequired }} confirm={approvalRequired ? "Stop requiring approval before publishing?" : "Require administrator approval before organizers publish events?"}>{approvalRequired ? "Stop requiring approval" : "Require approval"}</ApiButton>
       </section>
       <dl className="mt-8 max-w-3xl divide-y divide-border rounded-lg bg-surface shadow-card">
         {rows.map(([k, v]) => <div key={k} className="grid gap-1 px-5 py-3 sm:grid-cols-[14rem_1fr]"><dt className="text-sm text-fg-subtle">{k}</dt><dd className="break-words">{v}</dd></div>)}

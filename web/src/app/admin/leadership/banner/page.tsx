@@ -19,7 +19,7 @@ export const metadata: Metadata = { title: "Member banner", robots: { index: fal
 export default function AdminBannerPage({ searchParams }: { searchParams: SearchParams }) {
   return (
     <Suspense fallback={<Container className="py-14"><Skeleton className="h-96 w-full" /></Container>}>
-      <AdminShell section="leadership" returnTo="/admin/leadership/banner"><Content searchParams={searchParams} /></AdminShell>
+      <AdminShell section="banner" returnTo="/admin/leadership/banner"><Content searchParams={searchParams} /></AdminShell>
     </Suspense>
   );
 }

@@ -6,11 +6,20 @@ import { Container } from "@/components/ui/container";
 const NAV = [
   { key: "overview", href: "/admin", label: "Overview" },
   { key: "users", href: "/admin/users", label: "Users" },
-  { key: "events", href: "/admin/events", label: "Events" },
   { key: "organizations", href: "/admin/organizations", label: "Organizations" },
+  { key: "events", href: "/admin/events", label: "Events" },
+  { key: "event-approvals", href: "/admin/event-approvals", label: "Event approvals" },
+  { key: "teams", href: "/admin/teams", label: "Teams" },
+  { key: "submissions", href: "/admin/submissions", label: "Submissions" },
+  { key: "judging", href: "/admin/judging", label: "Judging" },
+  { key: "results", href: "/admin/results", label: "Results" },
+  { key: "certificates", href: "/admin/certificates", label: "Certificates" },
+  { key: "announcements", href: "/admin/announcements", label: "Announcements" },
   { key: "leadership", href: "/admin/leadership", label: "Leadership" },
+  { key: "banner", href: "/admin/leadership/banner", label: "Banner creator" },
   { key: "analytics", href: "/admin/analytics", label: "Analytics" },
-  { key: "audit", href: "/admin/audit", label: "Audit and security" },
+  { key: "audit", href: "/admin/audit", label: "Audit logs" },
+  { key: "maintenance", href: "/admin/maintenance", label: "Maintenance" },
   { key: "settings", href: "/admin/settings", label: "Settings" },
 ] as const;
 
@@ -26,7 +35,7 @@ export function AdminShell({ section, returnTo, children }: { section: AdminSect
       <Container className="py-10 sm:py-14 lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:items-start lg:gap-10">
         <nav
           aria-label="Administration sections"
-          className="mb-8 flex gap-1 overflow-x-auto glass rounded-xl p-1 [scrollbar-width:thin] lg:sticky lg:top-24 lg:mb-0 lg:flex-col lg:overflow-visible lg:p-2"
+          className="mb-8 flex gap-1 overflow-x-auto glass rounded-xl p-1 [scrollbar-width:thin] lg:sticky lg:top-24 lg:mb-0 lg:max-h-[calc(100dvh-8rem)] lg:flex-col lg:overflow-y-auto lg:p-2"
         >
           {NAV.map((n) => (
             <Link

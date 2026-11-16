@@ -31,6 +31,7 @@ export function ApiButton({ url, method = "POST", body, children, variant = "sec
   const [pending, setPending] = useState(false);
   const hydrated = useHydrated(); // disabled until the page is interactive, so an early tap is never lost
   const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
 
   async function run() {
     if (confirm && !window.confirm(confirm)) return;
@@ -42,11 +43,15 @@ export function ApiButton({ url, method = "POST", body, children, variant = "sec
     }
     setPending(true);
     setError(null);
+    setDone(false);
     const res = await sendJson(url, reason !== undefined ? { ...body, reason } : body, method as "POST");
     setPending(false);
     if (res.ok) {
       if (doneHref) router.push(doneHref);
-      else router.refresh();
+      else {
+        setDone(true); // inline confirmation (announced to assistive technology); cleared on the next action
+        router.refresh();
+      }
     } else {
       setError(res.status === 429 ? rateLimitMessage(res.retryAfterSeconds) : Object.values(res.fieldErrors)[0] ?? res.message ?? "Something went wrong.");
     }
@@ -55,6 +60,7 @@ export function ApiButton({ url, method = "POST", body, children, variant = "sec
   return (
     <span className="inline-flex flex-col gap-2">
       {error && <FormAlert>{error}</FormAlert>}
+      <span role="status" className="text-sm text-fg-muted">{done ? "Done." : ""}</span>
       <Button type="button" variant={variant} className={className} onClick={run} disabled={pending || !hydrated} aria-disabled={pending || !hydrated}>
         {children}
       </Button>
