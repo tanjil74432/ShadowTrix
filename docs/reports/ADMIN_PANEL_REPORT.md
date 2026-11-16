@@ -72,7 +72,9 @@ Every change runs in a transaction with its audit row: `event.review_submitted|a
 
 ## 10. Final commit and CI
 
-Filled in after the push (see below).
+Implementation commit: `56e499412c14c656ead98a185472964b1e5e17a6` on `feature/milestone-5-6-events-dashboards` (pushed to that branch only; no merge, no deployment). CI for that exact SHA: run 43974039201, `completed / success` (job `web`, every step green).
+
+Local results before the push: `tsc` and `eslint` clean; `prisma validate` valid, 14 migrations up to date, no drift; Vitest 28 files, 525 tests passed; Playwright `npm run test:e2e` 145 passed, 7 skipped (6 existing skips plus the opt-in screenshot spec), 0 failed; `npm audit --omit=dev` 0 vulnerabilities; `next build` succeeded.
 
 ## Screenshots
 
