@@ -10,24 +10,29 @@ import { db, expect, test, uiLogin } from "./helpers/fixtures";
  */
 test.skip(!process.env.B2_BROWSER, "real-bucket browser test; run with playwright.b2.config.ts");
 
-const env = dotenv.parse(readFileSync(".env.storage"));
-const endpoint = env.S3_ENDPOINT.replace(/\/+$/, "");
-const region = env.S3_REGION || /^s3\.([a-z0-9-]+)\.backblazeb2\.com$/.exec(new URL(endpoint).hostname)![1];
-const client = new AwsClient({ accessKeyId: env.S3_ACCESS_KEY_ID, secretAccessKey: env.S3_SECRET_ACCESS_KEY, service: "s3", region, retries: 2 });
-const base = `${endpoint}/${env.S3_BUCKET}`;
+/** Read lazily, only when the test really runs: this file is loaded by every Playwright run (including CI, where .env.storage does not exist). */
+function makeCtx() {
+  const env = dotenv.parse(readFileSync(".env.storage"));
+  const endpoint = env.S3_ENDPOINT.replace(/\/+$/, "");
+  const region = env.S3_REGION || /^s3\.([a-z0-9-]+)\.backblazeb2\.com$/.exec(new URL(endpoint).hostname)![1];
+  const client = new AwsClient({ accessKeyId: env.S3_ACCESS_KEY_ID, secretAccessKey: env.S3_SECRET_ACCESS_KEY, service: "s3", region, retries: 2 });
+  return { env, endpoint, client, base: `${endpoint}/${env.S3_BUCKET}` };
+}
+let cached: ReturnType<typeof makeCtx> | null = null;
+const b2 = () => (cached ??= makeCtx());
 const PDF = Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n% real browser upload test\n");
 
-const head = async (key: string) => (await client.fetch(`${base}/${key}`, { method: "HEAD" })).status;
+const head = async (key: string) => (await b2().client.fetch(`${b2().base}/${key}`, { method: "HEAD" })).status;
 const versionCount = async (key: string) => {
-  const r = await client.fetch(`${base}?versions&prefix=${encodeURIComponent(key)}`);
+  const r = await b2().client.fetch(`${b2().base}?versions&prefix=${encodeURIComponent(key)}`);
   return [...(await r.text()).matchAll(/<(Version|DeleteMarker)>/g)].length;
 };
 const purge = async (key: string) => {
   // test hygiene only: delete every version of exactly this test object
-  const xml = await (await client.fetch(`${base}?versions&prefix=${encodeURIComponent(key)}`)).text();
+  const xml = await (await b2().client.fetch(`${b2().base}?versions&prefix=${encodeURIComponent(key)}`)).text();
   for (const m of xml.matchAll(/<(Version|DeleteMarker)>([\s\S]*?)<\/\1>/g)) {
     const k = /<Key>([^<]+)<\/Key>/.exec(m[2])?.[1], v = /<VersionId>([^<]+)<\/VersionId>/.exec(m[2])?.[1];
-    if (k === key && v) await client.fetch(`${base}/${k}?versionId=${encodeURIComponent(v)}`, { method: "DELETE" });
+    if (k === key && v) await b2().client.fetch(`${b2().base}/${k}?versionId=${encodeURIComponent(v)}`, { method: "DELETE" });
   }
 };
 
@@ -50,7 +55,7 @@ test("a real browser uploads to the private bucket; the attached object is immut
   let key = "";
   let tempKey = "";
   let putUrl = ""; // the signed upload URL the page used (kept in memory only, never printed)
-  page.on("request", (r) => { if (r.method() === "PUT" && new URL(r.url()).hostname === new URL(endpoint).hostname) putUrl = r.url(); });
+  page.on("request", (r) => { if (r.method() === "PUT" && new URL(r.url()).hostname === new URL(b2().endpoint).hostname) putUrl = r.url(); });
   try {
     await uiLogin(page, owner, `/events/${event.slug}/submission`);
     await page.locator('input[type="file"]').setInputFiles({ name: "b2-browser-test.pdf", mimeType: "application/pdf", buffer: PDF });
@@ -72,7 +77,7 @@ test("a real browser uploads to the private bucket; the attached object is immut
     expect(problems, "no CSP or CORS console errors").toEqual([]);
 
     // privacy: an unsigned request to the bucket is refused, and a stranger cannot get a download link
-    expect([401, 403]).toContain((await fetch(`${base}/${key}`)).status);
+    expect([401, 403]).toContain((await fetch(`${b2().base}/${key}`)).status);
     const downloadPath = `/api/v1/submissions/${file.submissionId}/files/${file.id}`;
     await uiLogin(page, stranger, "/dashboard");
     expect((await page.request.get(downloadPath, { maxRedirects: 0 })).status()).toBe(404);
@@ -82,7 +87,7 @@ test("a real browser uploads to the private bucket; the attached object is immut
     const redirect = await page.request.get(downloadPath, { maxRedirects: 0 });
     expect(redirect.status()).toBe(307);
     const location = new URL(redirect.headers()["location"]);
-    expect(location.hostname).toBe(new URL(endpoint).hostname);
+    expect(location.hostname).toBe(new URL(b2().endpoint).hostname);
     expect(location.searchParams.get("X-Amz-Expires")).toBe("60");
     const dl = await fetch(location);
     expect(dl.status).toBe(200);
@@ -93,7 +98,7 @@ test("a real browser uploads to the private bucket; the attached object is immut
     // IMMUTABLE OBJECT: the browser's signed upload URL is still valid, so tamper with the temporary object through it, exactly as a
     // malicious user could. The attached permanent object must not change.
     expect(putUrl).not.toBe("");
-    tempKey = decodeURIComponent(new URL(putUrl).pathname.replace(`/${env.S3_BUCKET}/`, ""));
+    tempKey = decodeURIComponent(new URL(putUrl).pathname.replace(`/${b2().env.S3_BUCKET}/`, ""));
     expect(tempKey).toMatch(/^incoming\//);
     expect(tempKey).not.toBe(key); // the attached key is a different, permanent key
     const evil = Buffer.from(PDF.toString("latin1").replace("browser upload test", "TAMPERED upload tests")); // same length, still a PDF
