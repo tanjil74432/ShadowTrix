@@ -85,4 +85,6 @@ export const POLICIES = {
   resendIp: { limit: 20, windowSeconds: 60 * 60 },
   tokenSubmitIp: { limit: 20, windowSeconds: 15 * 60 },
   changePasswordUser: { limit: 5, windowSeconds: 15 * 60 },
+  // Register/cancel take a row lock and change seat counts; a person has no reason to do this more than a few times a minute.
+  eventRegistrationUser: { limit: 30, windowSeconds: 60 },
 } satisfies Record<string, RateLimitPolicy>;

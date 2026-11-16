@@ -9,3 +9,10 @@ export async function eventId(ctx: { params: Promise<Record<string, string>> }):
   if (!parsed.success) throw notFound("Event");
   return parsed.data;
 }
+
+/** Any UUID route parameter by name. Malformed values are a 404, like unknown ones. */
+export async function uuidParam(ctx: { params: Promise<Record<string, string>> }, name: string, what = "Resource"): Promise<string> {
+  const parsed = uuid.safeParse((await ctx.params)[name]);
+  if (!parsed.success) throw notFound(what);
+  return parsed.data;
+}

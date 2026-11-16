@@ -13,7 +13,7 @@ Configuration is read from the environment and validated once by `web/src/server
 | `CRON_SECRET` | no | unset | 32+ random characters. Bearer secret for `POST /api/v1/internal/cleanup`. Unset = endpoint disabled (404). Never commit it. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` | no | `localhost`, `1025`, `false`, none, none | Outgoing email. Mailpit (docker compose) in development. |
 | `EMAIL_FROM` | no | `ShadowTrix <no-reply@shadowtrix.local>` | Sender. Use a real, authenticated domain in production. |
-| `STORAGE_DRIVER` and `S3_*`, `STORAGE_LOCAL_DIR` | no | `local` | File storage (used from Milestone 7). `s3` requires `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. |
+| `STORAGE_DRIVER`, `STORAGE_LOCAL_DIR` | no | `local`, `./.storage` | Private file storage for project uploads (Milestone 7). `local` writes under `STORAGE_LOCAL_DIR` (git-ignored; back it up and keep it out of any web root). **`s3` is not implemented yet**: selecting it makes the first upload fail with a clear error. `S3_*` variables are reserved for that future driver. |
 | `ENABLE_STYLEGUIDE` | no | `false` | Exposes the internal `/design-system` page. Keep `false` in production. |
 
 Test-only (not read by the app): `MAILPIT_URL` (default `http://localhost:8025`) tells the Playwright tests where to read emails. The e2e suite generates its own random `AUTH_SECRET` per run.

@@ -61,6 +61,12 @@ export const CalendarIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M4 10h16M9 3v4M15 3v4" />
   </Icon>
 );
+export const ClockIcon = (p: SVGProps<SVGSVGElement>) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 7.5V12l3 2" />
+  </Icon>
+);
 export const InboxIcon = (p: SVGProps<SVGSVGElement>) => (
   <Icon {...p}>
     <path d="M4 13l2.5-7h11L20 13M4 13v5a1 1 0 001 1h14a1 1 0 001-1v-5M4 13h5l1 2h4l1-2h5" />

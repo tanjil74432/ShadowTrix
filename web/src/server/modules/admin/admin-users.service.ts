@@ -2,6 +2,7 @@ import "server-only";
 import type { Prisma, RoleKey } from "@/generated/prisma/client";
 import { getDb } from "@/server/db/client";
 import { AppError, forbidden, notFound } from "@/server/http/errors";
+import { stripNul } from "@/lib/sanitize";
 import { writeAudit } from "@/server/modules/audit/audit.service";
 import { revokeAllUserSessions } from "@/server/modules/auth/session.service";
 import { ASSIGNABLE_ROLES, can, type Actor } from "@/server/modules/authz/permissions";
@@ -40,7 +41,7 @@ export async function listUsers(actor: Actor, opts: { page: number; pageSize: nu
   if (!can(actor, "users:read")) throw forbidden();
   const pageSize = Math.min(Math.max(opts.pageSize, 1), 100);
   const page = Math.max(opts.page, 1);
-  const q = opts.q?.trim();
+  const q = opts.q ? stripNul(opts.q).trim() : undefined;
   const where: Prisma.UserWhereInput = q
     ? { OR: [{ email: { contains: q.toLowerCase() } }, { fullName: { contains: q, mode: "insensitive" } }] }
     : {};

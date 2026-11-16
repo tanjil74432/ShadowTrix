@@ -22,6 +22,9 @@ export interface EventFormValues {
   judgingEndsAt: string;
   resultsAnnouncementAt: string;
   capacity: string;
+  registrationMode: string;
+  minTeamSize: string;
+  maxTeamSize: string;
   locationType: string;
   location: string;
   eligibility: string;
@@ -29,7 +32,7 @@ export interface EventFormValues {
 
 export const EMPTY_EVENT: EventFormValues = {
   title: "", category: "HACKATHON", summary: "", description: "", startsAt: "", endsAt: "", registrationOpensAt: "", registrationClosesAt: "",
-  submissionDeadline: "", judgingStartsAt: "", judgingEndsAt: "", resultsAnnouncementAt: "", capacity: "", locationType: "ONLINE", location: "", eligibility: "",
+  submissionDeadline: "", judgingStartsAt: "", judgingEndsAt: "", resultsAnnouncementAt: "", capacity: "", registrationMode: "INDIVIDUAL", minTeamSize: "", maxTeamSize: "", locationType: "ONLINE", location: "", eligibility: "",
 };
 
 /** "2031-05-02T09:30" (a datetime-local value) -> ISO in UTC. Empty stays empty. */
@@ -60,7 +63,8 @@ export function EventForm({ mode, eventId, values = EMPTY_EVENT }: { mode: "crea
     const f = new FormData(e.currentTarget);
     const body: Record<string, unknown> = {
       title: f.get("title"), category: f.get("category"), summary: f.get("summary"), description: f.get("description"),
-      capacity: String(f.get("capacity") ?? "").trim(), locationType: f.get("locationType"), location: f.get("location"), eligibility: f.get("eligibility"),
+      capacity: String(f.get("capacity") ?? "").trim(), locationType: f.get("locationType"),
+      registrationMode: f.get("registrationMode"), minTeamSize: String(f.get("minTeamSize") ?? "").trim(), maxTeamSize: String(f.get("maxTeamSize") ?? "").trim(), location: f.get("location"), eligibility: f.get("eligibility"),
     };
     for (const [key] of DATE_FIELDS) body[key] = toIso(f.get(key));
     setPending(true);
@@ -131,7 +135,21 @@ export function EventForm({ mode, eventId, values = EMPTY_EVENT }: { mode: "crea
           <Field label="Location" error={errors.location} hint="City, venue or link description.">
             {(p) => <Input {...p} name="location" defaultValue={values.location} maxLength={200} />}
           </Field>
-          <Field label="Capacity" error={errors.capacity} hint="Leave empty for no limit. Extra people join a waiting list.">
+          <Field label="Registration" required error={errors.registrationMode} hint="Team events are joined through teams; capacity then counts teams.">
+            {(p) => (
+              <Select {...p} name="registrationMode" defaultValue={values.registrationMode}>
+                <option value="INDIVIDUAL">Individual participants</option>
+                <option value="TEAM">Teams</option>
+              </Select>
+            )}
+          </Field>
+          <Field label="Minimum team size" error={errors.minTeamSize} hint="Only for team events.">
+            {(p) => <Input {...p} name="minTeamSize" type="number" min={1} max={50} inputMode="numeric" defaultValue={values.minTeamSize} />}
+          </Field>
+          <Field label="Maximum team size" error={errors.maxTeamSize} hint="Only for team events.">
+            {(p) => <Input {...p} name="maxTeamSize" type="number" min={1} max={50} inputMode="numeric" defaultValue={values.maxTeamSize} />}
+          </Field>
+          <Field label="Capacity" error={errors.capacity} hint="Leave empty for no limit. Extra people (or teams) join a waiting list.">
             {(p) => <Input {...p} name="capacity" type="number" min={1} max={100000} inputMode="numeric" defaultValue={values.capacity} />}
           </Field>
         </div>

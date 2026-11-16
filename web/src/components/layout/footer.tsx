@@ -19,7 +19,7 @@ async function CurrentYear() {
 
 export function Footer() {
   return (
-    <footer className="border-t border-border bg-surface">
+    <footer className="ambient-bottom border-t border-accent/25 bg-surface">
       <Container className="py-14">
         <div className="grid gap-10 md:grid-cols-[1.4fr_repeat(3,1fr)]">
           <div className="max-w-xs">

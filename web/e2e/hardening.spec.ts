@@ -141,7 +141,7 @@ test.describe("scheduled cleanup endpoint", () => {
     expect((await request.post(url)).status()).toBe(401);
     expect((await request.post(url, { headers: { Authorization: "Bearer wrong" } })).status()).toBe(401);
     expect((await request.post(url, { headers: { Authorization: `Bearer ${secret().slice(0, -1)}x` } })).status()).toBe(401);
-    expect((await request.get(url)).status()).toBe(405);
+    expect((await request.get(url)).status()).toBe(401); // GET is accepted (Vercel Cron) but needs the same secret
     expect(await db().user.count({ where: { id: stale.id } })).toBe(1);
 
     const ok = await request.post(url, { headers: { Authorization: `Bearer ${secret()}` } });

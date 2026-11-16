@@ -75,13 +75,14 @@ test.describe("structure, SEO and audit requirements", () => {
 
   test("hero headline exists exactly once in the DOM text and is selectable", async ({ page }) => {
     await page.goto("/");
-    const h1 = page.getByRole("heading", { level: 1 });
-    await expect(h1).toHaveText("Enter the Matrix of Innovation.");
+    // The hero has an animated word (see hero.spec.ts). Assistive technology gets ONE constant sentence from a single
+    // visually-hidden element; the two visual lines are aria-hidden, so the changing letters are never announced.
+    const h1 = page.getByRole("heading", { level: 1, name: "Enter the Matrix of Innovation." });
+    await expect(h1).toBeVisible();
     const occurrences = await page.evaluate(() => (document.body.innerText.match(/Enter the Matrix of Innovation\./g) ?? []).length);
     expect(occurrences).toBe(1);
-    // nothing hidden duplicates it for assistive tech
-    expect(await page.locator("[aria-hidden='true']", { hasText: "Matrix of Innovation" }).count()).toBe(0);
-    expect(await page.locator(".sr-only", { hasText: "Matrix of Innovation" }).count()).toBe(0);
+    expect(await page.locator("h1 .sr-only").count()).toBe(1);
+    expect(await page.locator("h1 [aria-hidden='true']").count()).toBeGreaterThan(0);
     expect(await h1.evaluate((el) => getComputedStyle(el).userSelect)).not.toBe("none");
   });
 
@@ -134,7 +135,7 @@ test.describe("structure, SEO and audit requirements", () => {
   });
 
   test("placeholder pages are not indexable", async ({ page }) => {
-    for (const route of ["/about", "/about/team", "/community", "/contact", "/login", "/register"]) {
+    for (const route of ["/about", "/community", "/contact", "/login", "/register"]) {
       await page.goto(route);
       await expect(page.getByRole("heading", { level: 1 }), route).toBeVisible();
       expect(await page.locator("meta[name='robots']").getAttribute("content"), route).toContain("noindex");
@@ -259,8 +260,10 @@ test.describe("keyboard and assistive technology", () => {
   test("reduced motion: hero text is visible immediately and nothing loops", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
-    const word = page.getByRole("heading", { level: 1 }).locator("span span").first();
-    expect(Number(await word.evaluate((el) => getComputedStyle(el).opacity))).toBe(1);
+    const h1 = page.getByRole("heading", { level: 1 });
+    await expect(h1.locator(".hero-word")).toHaveText("Innovation");
+    await expect(h1.locator(".hero-caret")).toHaveCount(0);
+    expect(Number(await h1.locator("span[aria-hidden]").first().evaluate((el) => getComputedStyle(el).opacity))).toBe(1);
     const durations = await page.$$eval("*", (els) =>
       els.map((e) => getComputedStyle(e)).filter((s) => s.animationName !== "none").map((s) => parseFloat(s.animationDuration)),
     );

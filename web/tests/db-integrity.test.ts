@@ -115,10 +115,73 @@ describe("database integrity", () => {
           data: eventData({ registrationMode: "TEAM", minTeamSize: 1, maxTeamSize: 4 }),
         });
         const t = await tx.team.create({ data: { eventId: e.id, name: "T", leaderId: a.id } });
-        await tx.teamMember.create({ data: { teamId: t.id, userId: a.id, role: "LEADER" } });
-        await tx.teamMember.create({ data: { teamId: t.id, userId: b.id, role: "LEADER" } });
+        await tx.teamMember.create({ data: { teamId: t.id, eventId: e.id, userId: a.id, role: "LEADER" } });
+        await tx.teamMember.create({ data: { teamId: t.id, eventId: e.id, userId: b.id, role: "LEADER" } });
       }),
     ).rejects.toThrow(/team_members_single_leader_idx/);
+  });
+
+  it("a person can be in only one team per event, and a membership must match its team's event", async () => {
+    await expect(
+      rolledBack(async (tx) => {
+        const a = await user(tx);
+        const b = await user(tx);
+        const e = await tx.event.create({ data: eventData({ registrationMode: "TEAM", minTeamSize: 1, maxTeamSize: 4 }) });
+        const t1 = await tx.team.create({ data: { eventId: e.id, name: "T1", leaderId: a.id } });
+        const t2 = await tx.team.create({ data: { eventId: e.id, name: "T2", leaderId: b.id } });
+        await tx.teamMember.create({ data: { teamId: t1.id, eventId: e.id, userId: a.id, role: "LEADER" } });
+        await tx.teamMember.create({ data: { teamId: t2.id, eventId: e.id, userId: a.id, role: "MEMBER" } });
+      }),
+    ).rejects.toThrow(/team_members_event_id_user_id_key/);
+    await expect(
+      rolledBack(async (tx) => {
+        const a = await user(tx);
+        const e1 = await tx.event.create({ data: eventData({ registrationMode: "TEAM", minTeamSize: 1, maxTeamSize: 4 }) });
+        const e2 = await tx.event.create({ data: eventData({ registrationMode: "TEAM", minTeamSize: 1, maxTeamSize: 4 }) });
+        const t = await tx.team.create({ data: { eventId: e1.id, name: "T", leaderId: a.id } });
+        await tx.teamMember.create({ data: { teamId: t.id, eventId: e2.id, userId: a.id, role: "LEADER" } });
+      }),
+    ).rejects.toThrow(/team_members_team_id_event_id_fkey/);
+  });
+
+  it("the team size limit is enforced by the database", async () => {
+    await expect(
+      rolledBack(async (tx) => {
+        const [a, b, c] = [await user(tx), await user(tx), await user(tx)];
+        const e = await tx.event.create({ data: eventData({ registrationMode: "TEAM", minTeamSize: 1, maxTeamSize: 2 }) });
+        const t = await tx.team.create({ data: { eventId: e.id, name: "T", leaderId: a.id } });
+        await tx.teamMember.create({ data: { teamId: t.id, eventId: e.id, userId: a.id, role: "LEADER" } });
+        await tx.teamMember.create({ data: { teamId: t.id, eventId: e.id, userId: b.id, role: "MEMBER" } });
+        await tx.teamMember.create({ data: { teamId: t.id, eventId: e.id, userId: c.id, role: "MEMBER" } });
+      }),
+    ).rejects.toThrow(/team is full/);
+  });
+
+  it("rejects a drafted submission that claims a submission time, and a submitted one without", async () => {
+    await expect(
+      rolledBack(async (tx) => {
+        const a = await user(tx);
+        const e = await tx.event.create({ data: eventData() });
+        await tx.submission.create({ data: { eventId: e.id, ownerId: a.id, title: "t", description: "d", status: "DRAFT", submittedAt: new Date() } });
+      }),
+    ).rejects.toThrow(/submissions_submitted_at_chk/);
+    await expect(
+      rolledBack(async (tx) => {
+        const a = await user(tx);
+        const e = await tx.event.create({ data: eventData() });
+        await tx.submission.create({ data: { eventId: e.id, ownerId: a.id, title: "t", description: "d", status: "SUBMITTED" } });
+      }),
+    ).rejects.toThrow(/submissions_submitted_at_chk/);
+  });
+
+  it("a certificate is revoked exactly when it has a revocation reason", async () => {
+    await expect(
+      rolledBack(async (tx) => {
+        const a = await user(tx);
+        const e = await tx.event.create({ data: eventData() });
+        await tx.certificate.create({ data: { publicCode: "X-1", eventId: e.id, userId: a.id, type: "PARTICIPATION", recipientName: "A", revokedAt: new Date() } });
+      }),
+    ).rejects.toThrow(/certificates_revoked_chk/);
   });
 
   it("rejects duplicate global role grants (NULL-scope uniqueness)", async () => {

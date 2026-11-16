@@ -20,13 +20,22 @@ const securityHeaders = [
  * form-action hijacks. A nonce or hash policy is tracked in docs/planning/security-backlog.md.
  */
 const isProd = process.env.NODE_ENV === "production";
+// Direct uploads: the browser PUTs the file to the object-storage endpoint, so exactly that origin (and nothing else) may be contacted.
+let storageOrigin = "";
+if (process.env.STORAGE_DRIVER === "s3" && process.env.S3_ENDPOINT) {
+  try {
+    storageOrigin = ` ${new URL(process.env.S3_ENDPOINT).origin}`;
+  } catch {
+    /* an invalid S3_ENDPOINT is reported by the environment validation at runtime */
+  }
+}
 const csp = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isProd ? "" : " 'unsafe-eval'"}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self'",
-  "connect-src 'self'",
+  `connect-src 'self'${storageOrigin}`,
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -37,6 +46,8 @@ const csp = [
 securityHeaders.push({ key: "Content-Security-Policy", value: csp });
 
 const nextConfig: NextConfig = {
+  // Do not advertise the framework in every response.
+  poweredByHeader: false,
   /* config options here */
   cacheComponents: true,
   partialPrefetching: true,

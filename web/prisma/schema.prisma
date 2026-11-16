@@ -4,8 +4,8 @@
 // migration SQL (see prisma/migrations/*_integrity_checks).
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
   // CommonJS output so Playwright's test loader (which compiles TypeScript to CJS) can import the client.
   moduleFormat = "cjs"
 }
@@ -90,6 +90,11 @@ enum TeamMemberRole {
   MEMBER
 }
 
+enum TeamStatus {
+  ACTIVE
+  DISBANDED
+}
+
 enum InvitationStatus {
   PENDING
   ACCEPTED
@@ -144,37 +149,42 @@ model User {
   createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  roles            UserRoleAssignment[]
-  authTokens       AuthToken[]
-  sessions         Session[]
-  auditLogs        AuditLog[]
-  organizerOf      EventOrganizer[]
-  registrations    Registration[]
-  teamsLed         Team[]               @relation("TeamLeader")
-  teamMemberships  TeamMember[]
-  invitationsSent  TeamInvitation[]     @relation("InvitationInviter")
-  invitationsRecv  TeamInvitation[]     @relation("InvitationInvitee")
-  submissions      Submission[]
-  judgeAssignments JudgeAssignment[]
-  scores           Score[]
-  certificates     Certificate[]
-  announcements    Announcement[]
-  createdEvents    Event[]              @relation("EventCreator")
-  orgMember        OrgMember?
-  mfa              UserMfa?
-  mfaRecoveryCodes MfaRecoveryCode[]
+  roles                 UserRoleAssignment[]
+  authTokens            AuthToken[]
+  sessions              Session[]
+  auditLogs             AuditLog[]
+  organizerOf           EventOrganizer[]
+  registrations         Registration[]
+  teamsLed              Team[]               @relation("TeamLeader")
+  teamMemberships       TeamMember[]
+  invitationsSent       TeamInvitation[]     @relation("InvitationInviter")
+  invitationsRecv       TeamInvitation[]     @relation("InvitationInvitee")
+  submissions           Submission[]
+  judgeAssignments      JudgeAssignment[]
+  scores                Score[]
+  certificates          Certificate[]
+  announcements         Announcement[]
+  createdEvents         Event[]              @relation("EventCreator")
+  orgMember             OrgMember?
+  submissionVersions    SubmissionVersion[]  @relation("SubmissionVersionAuthor")
+  submissionFiles       SubmissionFile[]     @relation("SubmissionFileUploader")
+  certificatesIssued    Certificate[]        @relation("CertificateIssuer")
+  mfa                   UserMfa?
+  mfaRecoveryCodes      MfaRecoveryCode[]
+  organizationsVerified Organization[]       @relation("OrganizationVerifier")
 
+  @@index([createdAt], map: "users_created_at_idx")
   @@map("users")
 }
 
 /// Global or scoped role grant. eventId / organizationId null = platform-wide.
 model UserRoleAssignment {
-  id             String  @id @default(uuid(7)) @db.Uuid
-  userId         String  @map("user_id") @db.Uuid
+  id             String   @id @default(uuid(7)) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
   role           RoleKey
-  eventId        String? @map("event_id") @db.Uuid
-  organizationId String? @map("organization_id") @db.Uuid
-  grantedById    String? @map("granted_by_id") @db.Uuid
+  eventId        String?  @map("event_id") @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  grantedById    String?  @map("granted_by_id") @db.Uuid
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -277,6 +287,7 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@index([actorId, createdAt])
+  @@index([createdAt], map: "audit_logs_created_at_idx")
   @@map("audit_logs")
 }
 
@@ -293,19 +304,22 @@ model SiteSetting {
 // hosts/co-hosts/partners without scoping data per tenant. No row-level tenancy.
 
 model Organization {
-  id          String           @id @default(uuid(7)) @db.Uuid
-  slug        String           @unique
-  name        String
-  type        OrganizationType @default(OTHER)
-  description String?
-  websiteUrl  String?          @map("website_url")
-  logoUrl     String?          @map("logo_url")
-  isOperator  Boolean          @default(false) @map("is_operator") // exactly one true (partial unique index)
-  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id           String           @id @default(uuid(7)) @db.Uuid
+  slug         String           @unique
+  name         String
+  type         OrganizationType @default(OTHER)
+  description  String?
+  websiteUrl   String?          @map("website_url")
+  logoUrl      String?          @map("logo_url")
+  isOperator   Boolean          @default(false) @map("is_operator") // exactly one true (partial unique index)
+  verifiedAt   DateTime?        @map("verified_at") @db.Timestamptz(3)
+  verifiedById String?          @map("verified_by_id") @db.Uuid
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   eventHosts EventHost[]
   roles      UserRoleAssignment[]
+  verifiedBy User?                @relation("OrganizationVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
 
   @@map("organizations")
 }
@@ -313,50 +327,51 @@ model Organization {
 // ───────────────────────── Events ─────────────────────────
 
 model Event {
-  id                   String           @id @default(uuid(7)) @db.Uuid
-  slug                 String           @unique
-  title                String
-  category             EventCategory
-  summary              String
-  description          String
-  coverImageUrl        String?          @map("cover_image_url")
-  status               EventStatus      @default(DRAFT)
-  startsAt             DateTime         @map("starts_at") @db.Timestamptz(3)
-  endsAt               DateTime         @map("ends_at") @db.Timestamptz(3)
-  registrationOpensAt  DateTime         @map("registration_opens_at") @db.Timestamptz(3)
-  registrationClosesAt DateTime         @map("registration_closes_at") @db.Timestamptz(3)
-  submissionDeadline   DateTime?        @map("submission_deadline") @db.Timestamptz(3)
-  judgingStartsAt      DateTime?        @map("judging_starts_at") @db.Timestamptz(3)
-  judgingEndsAt        DateTime?        @map("judging_ends_at") @db.Timestamptz(3)
-  resultsAnnouncementAt DateTime?       @map("results_announcement_at") @db.Timestamptz(3) // planned date; resultsPublishedAt is the actual publication
-  registrationManuallyClosed Boolean    @default(false) @map("registration_manually_closed")
-  capacity             Int?
-  registrationMode     RegistrationMode @default(INDIVIDUAL) @map("registration_mode")
-  minTeamSize          Int?             @map("min_team_size")
-  maxTeamSize          Int?             @map("max_team_size")
-  eligibility          String?
-  locationType         LocationType     @default(ONLINE) @map("location_type")
-  location             String?
-  timezone             String           @default("UTC")
-  resultsPublishedAt   DateTime?        @map("results_published_at") @db.Timestamptz(3)
-  createdById          String?          @map("created_by_id") @db.Uuid
-  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt            DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                         String           @id @default(uuid(7)) @db.Uuid
+  slug                       String           @unique
+  title                      String
+  category                   EventCategory
+  summary                    String
+  description                String
+  coverImageUrl              String?          @map("cover_image_url")
+  status                     EventStatus      @default(DRAFT)
+  startsAt                   DateTime         @map("starts_at") @db.Timestamptz(3)
+  endsAt                     DateTime         @map("ends_at") @db.Timestamptz(3)
+  registrationOpensAt        DateTime         @map("registration_opens_at") @db.Timestamptz(3)
+  registrationClosesAt       DateTime         @map("registration_closes_at") @db.Timestamptz(3)
+  submissionDeadline         DateTime?        @map("submission_deadline") @db.Timestamptz(3)
+  judgingStartsAt            DateTime?        @map("judging_starts_at") @db.Timestamptz(3)
+  judgingEndsAt              DateTime?        @map("judging_ends_at") @db.Timestamptz(3)
+  resultsAnnouncementAt      DateTime?        @map("results_announcement_at") @db.Timestamptz(3) // planned date; resultsPublishedAt is the actual publication
+  registrationManuallyClosed Boolean          @default(false) @map("registration_manually_closed")
+  capacity                   Int?
+  registrationMode           RegistrationMode @default(INDIVIDUAL) @map("registration_mode")
+  minTeamSize                Int?             @map("min_team_size")
+  maxTeamSize                Int?             @map("max_team_size")
+  eligibility                String?
+  locationType               LocationType     @default(ONLINE) @map("location_type")
+  location                   String?
+  timezone                   String           @default("UTC")
+  resultsPublishedAt         DateTime?        @map("results_published_at") @db.Timestamptz(3)
+  createdById                String?          @map("created_by_id") @db.Uuid
+  createdAt                  DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                  DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  createdBy     User?                @relation("EventCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  hosts         EventHost[]
-  organizers    EventOrganizer[]
-  schedule      EventScheduleItem[]
-  announcements Announcement[]
-  registrations Registration[]
-  teams         Team[]
-  submissions   Submission[]
-  criteria      JudgingCriterion[]
-  judges        JudgeAssignment[]
-  results       Result[]
-  certificates  Certificate[]
-  roleGrants    UserRoleAssignment[]
-  contributions OrgMemberContribution[]
+  createdBy            User?                   @relation("EventCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  hosts                EventHost[]
+  organizers           EventOrganizer[]
+  schedule             EventScheduleItem[]
+  announcements        Announcement[]
+  registrations        Registration[]
+  teams                Team[]
+  submissions          Submission[]
+  criteria             JudgingCriterion[]
+  judges               JudgeAssignment[]
+  results              Result[]
+  certificates         Certificate[]
+  certificateTemplates CertificateTemplate[]
+  roleGrants           UserRoleAssignment[]
+  contributions        OrgMemberContribution[]
 
   @@index([status, startsAt])
   @@index([category])
@@ -390,13 +405,13 @@ model EventOrganizer {
 }
 
 model EventScheduleItem {
-  id          String   @id @default(uuid(7)) @db.Uuid
-  eventId     String   @map("event_id") @db.Uuid
+  id          String    @id @default(uuid(7)) @db.Uuid
+  eventId     String    @map("event_id") @db.Uuid
   title       String
   description String?
-  startsAt    DateTime @map("starts_at") @db.Timestamptz(3)
+  startsAt    DateTime  @map("starts_at") @db.Timestamptz(3)
   endsAt      DateTime? @map("ends_at") @db.Timestamptz(3)
-  sortOrder   Int      @default(0) @map("sort_order")
+  sortOrder   Int       @default(0) @map("sort_order")
 
   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
@@ -423,12 +438,14 @@ model Announcement {
 // ───────────────── Registration & participant teams ─────────────────
 
 model Team {
-  id        String   @id @default(uuid(7)) @db.Uuid
-  eventId   String   @map("event_id") @db.Uuid
-  name      String
-  leaderId  String   @map("leader_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id          String     @id @default(uuid(7)) @db.Uuid
+  eventId     String     @map("event_id") @db.Uuid
+  name        String
+  description String?
+  status      TeamStatus @default(ACTIVE)
+  leaderId    String     @map("leader_id") @db.Uuid
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   event         Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
   leader        User             @relation("TeamLeader", fields: [leaderId], references: [id], onDelete: Restrict)
@@ -438,19 +455,22 @@ model Team {
   submission    Submission?
 
   @@unique([eventId, name])
+  @@unique([id, eventId])
   @@map("teams")
 }
 
 model TeamMember {
   teamId   String         @map("team_id") @db.Uuid
+  eventId  String         @map("event_id") @db.Uuid
   userId   String         @map("user_id") @db.Uuid
   role     TeamMemberRole @default(MEMBER)
   joinedAt DateTime       @default(now()) @map("joined_at") @db.Timestamptz(3)
 
-  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId, eventId], references: [id, eventId], onDelete: Cascade)
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([teamId, userId])
+  @@unique([eventId, userId])
   @@index([userId])
   @@map("team_members")
 }
@@ -494,35 +514,54 @@ model Registration {
   @@index([eventId, status])
   @@index([eventId, status, registeredAt], map: "registrations_event_status_registered_idx")
   @@index([userId])
+  @@index([registeredAt], map: "registrations_registered_at_idx")
   @@map("registrations")
 }
 
 // ───────────────────── Submissions & judging ─────────────────────
 
 model Submission {
-  id          String           @id @default(uuid(7)) @db.Uuid
-  eventId     String           @map("event_id") @db.Uuid
-  ownerId     String           @map("owner_id") @db.Uuid // submitting user (team leader for team events)
-  teamId      String?          @unique @map("team_id") @db.Uuid // one submission per team
-  title       String
-  description String
-  repoUrl     String?          @map("repo_url")
-  demoUrl     String?          @map("demo_url")
-  status      SubmissionStatus @default(DRAFT)
-  submittedAt DateTime?        @map("submitted_at") @db.Timestamptz(3)
-  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id             String           @id @default(uuid(7)) @db.Uuid
+  eventId        String           @map("event_id") @db.Uuid
+  ownerId        String           @map("owner_id") @db.Uuid // submitting user (team leader for team events)
+  teamId         String?          @unique @map("team_id") @db.Uuid // one submission per team
+  title          String
+  description    String
+  repoUrl        String?          @map("repo_url")
+  demoUrl        String?          @map("demo_url")
+  extraLinks     String[]         @default([]) @map("extra_links")
+  currentVersion Int              @default(0) @map("current_version")
+  status         SubmissionStatus @default(DRAFT)
+  submittedAt    DateTime?        @map("submitted_at") @db.Timestamptz(3)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  event  Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  owner  User             @relation(fields: [ownerId], references: [id], onDelete: Restrict)
-  team   Team?            @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  files  SubmissionFile[]
-  scores Score[]
-  result Result?
+  event    Event               @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  owner    User                @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  team     Team?               @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  files    SubmissionFile[]
+  versions SubmissionVersion[]
+  scores   Score[]
+  result   Result?
 
   @@unique([eventId, ownerId])
   @@index([eventId, status])
   @@map("submissions")
+}
+
+model SubmissionVersion {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  submissionId String   @map("submission_id") @db.Uuid
+  version      Int
+  snapshot     Json
+  createdById  String?  @map("created_by_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  createdBy  User?      @relation("SubmissionVersionAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([submissionId, version])
+  @@map("submission_versions")
 }
 
 model SubmissionFile {
@@ -532,12 +571,71 @@ model SubmissionFile {
   originalName String   @map("original_name")
   mimeType     String   @map("mime_type")
   sizeBytes    Int      @map("size_bytes")
+  sha256       String?
+  uploadedById String?  @map("uploaded_by_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  uploadedBy User?      @relation("SubmissionFileUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
 
   @@index([submissionId])
   @@map("submission_files")
+}
+
+/// Lifecycle of a direct upload (browser -> private bucket through a signed URL). PENDING until the server has verified the
+/// stored bytes and attached the file (COMPLETED); REJECTED when verification failed; EXPIRED when the cleanup job reaped an
+/// upload that was never completed. Exactly one transition out of PENDING can win (an atomic conditional UPDATE).
+enum PendingUploadStatus {
+  PENDING
+  COMPLETED
+  REJECTED
+  EXPIRED
+}
+
+/// One row per signed upload URL, so abandoned objects can be found and deleted. `submissionId` and `ownerId` are deliberately
+/// plain columns without foreign keys: the cleanup job must still be able to delete the object after a submission or user is gone.
+model PendingUpload {
+  id           String              @id @default(uuid(7)) @db.Uuid
+  storageKey   String              @unique @map("storage_key")
+  submissionId String              @map("submission_id") @db.Uuid
+  ownerId      String              @map("owner_id") @db.Uuid
+  contentType  String              @map("content_type")
+  declaredSize Int                 @map("declared_size")
+  status       PendingUploadStatus @default(PENDING)
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt    DateTime            @map("expires_at") @db.Timestamptz(3)
+  resolvedAt   DateTime?           @map("resolved_at") @db.Timestamptz(3)
+
+  @@index([status, expiresAt], map: "pending_uploads_status_expires_idx")
+  @@index([ownerId])
+  @@map("pending_uploads")
+}
+
+/// Why an object is queued for deletion. FILE/PHOTO/CERTIFICATE are written by database triggers when the owning row disappears
+/// (including cascades); UPLOAD_* are written by the upload service and the abandoned-upload sweep.
+enum StorageDeletionReason {
+  FILE_DELETED
+  PHOTO_DELETED
+  CERTIFICATE_DELETED
+  UPLOAD_EXPIRED
+  UPLOAD_REJECTED
+}
+
+/// Durable storage-deletion outbox. A row is inserted IN THE SAME TRANSACTION as the change that makes an object unreachable, so a
+/// rollback also removes the job and a commit can never lose it. The maintenance worker claims rows with a lease (crash recovery,
+/// safe concurrency), deletes the object with all its versions OUTSIDE any transaction, and deletes the row only after success.
+model StorageDeletion {
+  id            String                @id @default(uuid(7)) @db.Uuid
+  storageKey    String                @unique @map("storage_key")
+  reason        StorageDeletionReason
+  attempts      Int                   @default(0)
+  createdAt     DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  nextAttemptAt DateTime              @default(now()) @map("next_attempt_at") @db.Timestamptz(3)
+  lockedUntil   DateTime?             @map("locked_until") @db.Timestamptz(3)
+  lastErrorCode String?               @map("last_error_code")
+
+  @@index([nextAttemptAt])
+  @@map("storage_deletions")
 }
 
 model JudgingCriterion {
@@ -569,14 +667,15 @@ model JudgeAssignment {
 }
 
 model Score {
-  id           String   @id @default(uuid(7)) @db.Uuid
-  submissionId String   @map("submission_id") @db.Uuid
-  judgeId      String   @map("judge_id") @db.Uuid
-  criterionId  String   @map("criterion_id") @db.Uuid
-  score        Decimal  @db.Decimal(6, 2)
+  id           String    @id @default(uuid(7)) @db.Uuid
+  submissionId String    @map("submission_id") @db.Uuid
+  judgeId      String    @map("judge_id") @db.Uuid
+  criterionId  String    @map("criterion_id") @db.Uuid
+  score        Decimal   @db.Decimal(6, 2)
   feedback     String?
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  finalizedAt  DateTime? @map("finalized_at") @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   submission Submission       @relation(fields: [submissionId], references: [id], onDelete: Cascade)
   judge      User             @relation(fields: [judgeId], references: [id], onDelete: Restrict)
@@ -584,6 +683,7 @@ model Score {
 
   @@unique([submissionId, judgeId, criterionId])
   @@index([judgeId])
+  @@index([submissionId, judgeId], map: "scores_submission_id_judge_id_idx")
   @@map("scores")
 }
 
@@ -595,6 +695,8 @@ model Result {
   rank         Int?
   award        AwardType @default(NONE)
   publishedAt  DateTime? @map("published_at") @db.Timestamptz(3)
+  breakdown    Json?
+  computedAt   DateTime  @default(now()) @map("computed_at") @db.Timestamptz(3)
 
   event      Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
   submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
@@ -606,22 +708,43 @@ model Result {
 // ───────────────────────── Certificates ─────────────────────────
 
 model Certificate {
-  id         String          @id @default(uuid(7)) @db.Uuid
-  publicCode String          @unique @map("public_code") // non-guessable, shown on certificate + verify URL
-  eventId    String          @map("event_id") @db.Uuid
-  userId     String          @map("user_id") @db.Uuid
-  type       CertificateType
-  recipientName String       @map("recipient_name") // snapshot at issue time
-  issuedAt   DateTime        @default(now()) @map("issued_at") @db.Timestamptz(3)
-  revokedAt  DateTime?       @map("revoked_at") @db.Timestamptz(3)
-  storageKey String?         @map("storage_key")
+  id            String          @id @default(uuid(7)) @db.Uuid
+  publicCode    String          @unique @map("public_code") // non-guessable, shown on certificate + verify URL
+  eventId       String          @map("event_id") @db.Uuid
+  userId        String          @map("user_id") @db.Uuid
+  type          CertificateType
+  recipientName String          @map("recipient_name") // snapshot at issue time
+  issuedAt      DateTime        @default(now()) @map("issued_at") @db.Timestamptz(3)
+  revokedAt     DateTime?       @map("revoked_at") @db.Timestamptz(3)
+  storageKey    String?         @map("storage_key")
+  revokedReason String?         @map("revoked_reason")
+  issuedById    String?         @map("issued_by_id") @db.Uuid
 
-  event Event @relation(fields: [eventId], references: [id], onDelete: Restrict)
-  user  User  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  event    Event @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  user     User  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  issuedBy User? @relation("CertificateIssuer", fields: [issuedById], references: [id], onDelete: SetNull)
 
   @@unique([eventId, userId, type])
   @@index([userId])
   @@map("certificates")
+}
+
+/// Wording of the certificate PDF for one event and certificate type. A built-in default is used when none exists.
+model CertificateTemplate {
+  id             String          @id @default(uuid(7)) @db.Uuid
+  eventId        String          @map("event_id") @db.Uuid
+  type           CertificateType
+  heading        String
+  body           String
+  signatoryName  String?         @map("signatory_name")
+  signatoryTitle String?         @map("signatory_title")
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, type])
+  @@map("certificate_templates")
 }
 
 // ───────────── Organization & leadership (public "Our Team") ─────────────
@@ -644,9 +767,9 @@ model OrgUnit {
 }
 
 model Designation {
-  id        String  @id @default(uuid(7)) @db.Uuid
-  title     String  @unique
-  rankOrder Int     @default(1000) @map("rank_order") // lower = more senior; drives hierarchy display
+  id        String @id @default(uuid(7)) @db.Uuid
+  title     String @unique
+  rankOrder Int    @default(1000) @map("rank_order") // lower = more senior; drives hierarchy display
 
   memberships OrgMembership[]
 
@@ -654,11 +777,11 @@ model Designation {
 }
 
 model OrgTerm {
-  id        String   @id @default(uuid(7)) @db.Uuid
-  label     String   @unique
-  startsOn  DateTime @map("starts_on") @db.Date
+  id        String    @id @default(uuid(7)) @db.Uuid
+  label     String    @unique
+  startsOn  DateTime  @map("starts_on") @db.Date
   endsOn    DateTime? @map("ends_on") @db.Date
-  isCurrent Boolean  @default(false) @map("is_current") // at most one true (partial unique index)
+  isCurrent Boolean   @default(false) @map("is_current") // at most one true (partial unique index)
 
   memberships OrgMembership[]
 
@@ -670,6 +793,7 @@ model OrgMember {
   slug             String       @unique
   fullName         String       @map("full_name")
   photoUrl         String?      @map("photo_url")
+  photoKey         String?      @map("photo_key")
   bio              String?
   department       String?
   linkedinUrl      String?      @map("linkedin_url")
@@ -697,15 +821,15 @@ model OrgMember {
 /// A member's position in a unit during a term. History is preserved; archiving
 /// a former board member sets isArchived/endedOn rather than deleting.
 model OrgMembership {
-  id           String    @id @default(uuid(7)) @db.Uuid
-  memberId     String    @map("member_id") @db.Uuid
-  unitId       String    @map("unit_id") @db.Uuid
-  designationId String   @map("designation_id") @db.Uuid
-  termId       String?   @map("term_id") @db.Uuid
-  startedOn    DateTime? @map("started_on") @db.Date
-  endedOn      DateTime? @map("ended_on") @db.Date
-  displayOrder Int       @default(0) @map("display_order")
-  isArchived   Boolean   @default(false) @map("is_archived")
+  id            String    @id @default(uuid(7)) @db.Uuid
+  memberId      String    @map("member_id") @db.Uuid
+  unitId        String    @map("unit_id") @db.Uuid
+  designationId String    @map("designation_id") @db.Uuid
+  termId        String?   @map("term_id") @db.Uuid
+  startedOn     DateTime? @map("started_on") @db.Date
+  endedOn       DateTime? @map("ended_on") @db.Date
+  displayOrder  Int       @default(0) @map("display_order")
+  isArchived    Boolean   @default(false) @map("is_archived")
 
   member      OrgMember   @relation(fields: [memberId], references: [id], onDelete: Cascade)
   unit        OrgUnit     @relation(fields: [unitId], references: [id], onDelete: Restrict)

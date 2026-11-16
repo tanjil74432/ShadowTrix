@@ -38,6 +38,13 @@ export function assertJsonContentType(req: Request): void {
   }
 }
 
+/** Upload endpoints: the Origin check still applies, and the body must be multipart form data. */
+export function assertMultipart(req: Request): void {
+  if (!/^multipart\/form-data\s*;/i.test(req.headers.get("content-type") ?? "")) {
+    throw new AppError(415, "unsupported_media_type", "Content-Type must be multipart/form-data");
+  }
+}
+
 function csrfError() {
   return new AppError(403, "csrf_check_failed", "Cross-site request rejected");
 }

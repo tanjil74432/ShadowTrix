@@ -16,7 +16,7 @@ import { NavLink } from "./nav-link";
 export function Navbar() {
   const [events, ...rest] = nav.primary;
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-bg/90 backdrop-blur-sm supports-[backdrop-filter]:bg-bg/80">
+    <header className="glass-nav sticky top-0 z-40">
       <Container className="flex h-16 items-center justify-between gap-6">
         <BrandLogo />
 

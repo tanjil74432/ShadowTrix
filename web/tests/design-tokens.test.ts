@@ -21,13 +21,13 @@ function contrast(a: string, b: string) {
 
 describe("design tokens", () => {
   it("defines the required color tokens", () => {
-    for (const t of ["bg", "surface", "surface-raised", "border", "fg", "fg-muted", "fg-subtle", "silver", "accent", "danger"]) {
+    for (const t of ["bg", "surface", "surface-raised", "border", "fg", "fg-muted", "fg-subtle", "silver", "accent", "accent-deep", "accent-soft", "on-accent", "accent-wash", "success", "warning", "danger"]) {
       expect(tokens[t], t).toBeDefined();
     }
   });
 
-  it("keeps the brand base pure black", () => {
-    expect(tokens.bg.toLowerCase()).toBe("#000000");
+  it("keeps the brand base near-black", () => {
+    expect(tokens.bg.toLowerCase()).toBe("#090909");
   });
 
   // WCAG 2.2 AA: 4.5:1 for body text.
@@ -44,7 +44,18 @@ describe("design tokens", () => {
     ["silver", "bg"],
     ["danger", "bg"],
     ["danger", "surface-raised"],
-    ["bg", "accent"], // black text on white buttons
+    ["accent", "bg"], // orange text and focus ring on the page
+    ["accent", "surface"],
+    ["accent-soft", "bg"],
+    ["accent-soft", "surface-raised"],
+    ["accent-soft", "accent-wash"], // orange text on tinted badges
+    ["fg", "accent-wash"],
+    ["success", "surface"],
+    ["warning", "surface"],
+    ["success", "bg"],
+    ["on-accent", "accent"], // dark text on orange buttons
+    ["on-accent", "accent-soft"], // hover
+    ["on-accent", "accent-deep"], // pressed
   ];
   it.each(textPairs)("text %s on %s has at least 4.5:1 contrast", (fg, bg) => {
     expect(contrast(fg, bg)).toBeGreaterThanOrEqual(4.5);

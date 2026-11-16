@@ -27,7 +27,7 @@ export function HowItWorks() {
               <li key={step.title} className="flex gap-5">
                 <span
                   aria-hidden
-                  className="grid size-10 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-silver"
+                  className="grid size-10 shrink-0 place-items-center rounded-full border border-accent/50 bg-accent-wash font-mono text-sm text-accent-soft"
                 >
                   {i + 1}
                 </span>

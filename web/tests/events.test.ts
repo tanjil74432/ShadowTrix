@@ -121,11 +121,14 @@ describe("event input validation", () => {
     expect(createEventSchema.safeParse({ ...ok(), capacity: 0 }).success).toBe(false);
     expect(createEventSchema.safeParse({ ...ok(), capacity: 1.5 }).success).toBe(false);
     expect(createEventSchema.safeParse({ ...ok(), startsAt: "not a date" }).success).toBe(false);
-    const parsed = createEventSchema.parse({ ...ok(), status: "PUBLISHED", slug: "evil", createdById: "x", registrationMode: "TEAM", capacity: "" });
+    const parsed = createEventSchema.parse({ ...ok(), status: "PUBLISHED", slug: "evil", createdById: "x", capacity: "" });
     expect(parsed).not.toHaveProperty("status");
     expect(parsed).not.toHaveProperty("slug");
     expect(parsed).not.toHaveProperty("createdById");
-    expect(parsed).not.toHaveProperty("registrationMode");
+    // team events must state their team sizes; individual events carry none
+    expect(createEventSchema.safeParse({ ...ok(), registrationMode: "TEAM" }).success).toBe(false);
+    expect(createEventSchema.safeParse({ ...ok(), registrationMode: "TEAM", minTeamSize: 3, maxTeamSize: 2 }).success).toBe(false);
+    expect(createEventSchema.safeParse({ ...ok(), registrationMode: "TEAM", minTeamSize: 2, maxTeamSize: 4 }).success).toBe(true);
     expect(parsed.capacity).toBeNull();
   });
   it("updates are partial but keep the rules", () => {
@@ -134,6 +137,7 @@ describe("event input validation", () => {
     expect(listEventsQuerySchema.parse({}).pageSize).toBe(12);
     expect(listEventsQuerySchema.safeParse({ pageSize: 500 }).success).toBe(false);
     expect(listEventsQuerySchema.safeParse({ category: "XX" }).success).toBe(false);
+    expect(listEventsQuerySchema.parse({ q: "a b" }).q).toBe("ab"); // NUL bytes would crash the database query
   });
 });
 
@@ -392,6 +396,45 @@ describe("registration and cancellation", () => {
     for (const p of [a, b, c]) await registerForEvent(p.actor, e.id);
     await updateEvent(o.actor, e.id, { capacity: 3 });
     expect(await getDb().registration.count({ where: { eventId: e.id, status: "CONFIRMED" } })).toBe(3);
+  });
+});
+
+describe("abuse resistance", () => {
+  it("register and cancel are rate limited per person", async () => {
+    const o = await organizer();
+    const e = await publishedEvent(o);
+    const p = await participant();
+    for (let i = 0; i < 15; i++) {
+      await registerForEvent(p.actor, e.id);
+      await cancelRegistration(p.actor, e.id);
+    }
+    await expect(registerForEvent(p.actor, e.id)).rejects.toMatchObject({ status: 429 });
+    await expect(cancelRegistration(p.actor, e.id)).rejects.toMatchObject({ status: 429 });
+  });
+
+  it("someone without access cannot stall an event: authorization is decided before the row lock is taken", async () => {
+    const o = await organizer();
+    const intruder = await organizer();
+    const e = await publishedEvent(o);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((r) => (locked = r));
+    const holder = getDb().$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM events WHERE id = ${e.id}::uuid FOR UPDATE`;
+        locked();
+        await held;
+      },
+      { timeout: 20_000 },
+    );
+    await lockTaken;
+    const started = Date.now();
+    await expect(updateEvent(intruder.actor, e.id, { title: "Hijack attempt here" })).rejects.toMatchObject({ status: 403 });
+    await expect(setEventStatus(intruder.actor, e.id, "cancel")).rejects.toMatchObject({ status: 403 });
+    expect(Date.now() - started).toBeLessThan(3000); // answered immediately while another transaction holds the lock
+    release();
+    await holder;
   });
 });
 

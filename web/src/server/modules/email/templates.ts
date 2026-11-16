@@ -64,6 +64,21 @@ export function passwordResetEmail(to: string, name: string, link: string, ttlMi
   };
 }
 
+export function teamInvitationEmail(to: string, inviterName: string, teamName: string, eventTitle: string, link: string, ttlDays: number): Mail {
+  return {
+    to,
+    subject: `${inviterName} invited you to join a team on ShadowTrix`,
+    text: `Hello,\n\n${inviterName} invited you to join the team "${teamName}" for the event "${eventTitle}" on ShadowTrix.\n\nOpen this link, log in with this email address, and choose to accept or decline:\n\n${link}\n\nThe invitation works once and expires in ${ttlDays} days. If you do not know ${inviterName}, ignore this email.`,
+    html: layout(
+      "You were invited to join a team",
+      p("Hello,") +
+        p(`${escapeHtml(inviterName)} invited you to join the team <strong>${escapeHtml(teamName)}</strong> for <strong>${escapeHtml(eventTitle)}</strong>.`) +
+        button(link, "View the invitation") +
+        p(`Log in with this email address to accept or decline. The invitation expires in ${ttlDays} days. If you do not know ${escapeHtml(inviterName)}, ignore this email.`),
+    ),
+  };
+}
+
 export function passwordChangedEmail(to: string, name: string, resetUrl: string): Mail {
   return {
     to,

@@ -4,6 +4,7 @@ import { getDb } from "@/server/db/client";
 import { AppError, conflict, notFound } from "@/server/http/errors";
 import { writeAudit } from "@/server/modules/audit/audit.service";
 import { canManageEvent, type Actor } from "@/server/modules/authz/permissions";
+import { enforceRateLimits, POLICIES } from "@/server/security/rate-limit";
 import { BLOCK_MESSAGE, placeFor, registrationBlock } from "./event-lifecycle";
 
 type Tx = Prisma.TransactionClient;
@@ -18,13 +19,36 @@ export async function lockEvent(tx: Tx, eventId: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-/** Moves the oldest waitlisted people into freed places. Call inside a transaction that holds the event lock. */
+/**
+ * Places taken. Individual events count confirmed people; team events count confirmed TEAMS (capacity is a number of
+ * teams, and every member of a registered team holds a registration row).
+ */
+export async function confirmedSeats(tx: Pick<Tx, "registration">, eventId: string, mode: "INDIVIDUAL" | "TEAM"): Promise<number> {
+  if (mode === "INDIVIDUAL") return tx.registration.count({ where: { eventId, status: "CONFIRMED" } });
+  const teams = await tx.registration.groupBy({ by: ["teamId"], where: { eventId, status: "CONFIRMED", teamId: { not: null } } });
+  return teams.length;
+}
+
+/** Moves the oldest waitlisted people (or teams) into freed places. Call inside a transaction that holds the event lock. */
 export async function promoteWaitlist(tx: Tx, eventId: string): Promise<number> {
-  const event = await tx.event.findUnique({ where: { id: eventId }, select: { capacity: true, status: true } });
+  const event = await tx.event.findUnique({ where: { id: eventId }, select: { capacity: true, status: true, registrationMode: true } });
   if (!event || event.status === "CANCELLED") return 0;
-  const confirmed = await tx.registration.count({ where: { eventId, status: "CONFIRMED" } });
+  const confirmed = await confirmedSeats(tx, eventId, event.registrationMode);
   const free = event.capacity == null ? 1000 : event.capacity - confirmed;
   if (free <= 0) return 0;
+  if (event.registrationMode === "TEAM") {
+    // Oldest waiting team first (by the time its leader registered it); a whole team is promoted at once.
+    const waiting = await tx.registration.groupBy({
+      by: ["teamId"],
+      where: { eventId, status: "WAITLISTED", teamId: { not: null } },
+      _min: { registeredAt: true },
+      orderBy: [{ _min: { registeredAt: "asc" } }, { teamId: "asc" }],
+      take: Math.min(free, 1000),
+    });
+    const teamIds = waiting.map((w) => w.teamId as string);
+    if (teamIds.length) await tx.registration.updateMany({ where: { eventId, status: "WAITLISTED", teamId: { in: teamIds } }, data: { status: "CONFIRMED" } });
+    return teamIds.length;
+  }
   const next = await tx.registration.findMany({
     where: { eventId, status: "WAITLISTED" },
     orderBy: [{ registeredAt: "asc" }, { id: "asc" }],
@@ -46,6 +70,7 @@ export interface RegistrationResult {
  * registration is reactivated (the unique (event, user) row is reused) and goes to the back of the queue.
  */
 export async function registerForEvent(actor: Actor, eventId: string, clock: Clock = realClock): Promise<RegistrationResult> {
+  await enforceRateLimits([{ scope: "event-registration:user", id: actor.id, policy: POLICIES.eventRegistrationUser }], clock.now());
   return getDb().$transaction(async (tx) => {
     if (!(await lockEvent(tx, eventId))) throw notFound("Event");
     const event = await tx.event.findUniqueOrThrow({ where: { id: eventId } });
@@ -59,7 +84,7 @@ export async function registerForEvent(actor: Actor, eventId: string, clock: Clo
     if (block === "NOT_PUBLISHED") throw notFound("Event"); // drafts and archived events do not exist for participants
     if (block) throw new AppError(409, `registration_${block.toLowerCase()}`, BLOCK_MESSAGE[block]);
 
-    const confirmed = await tx.registration.count({ where: { eventId, status: "CONFIRMED" } });
+    const confirmed = await confirmedSeats(tx, eventId, event.registrationMode);
     const status = placeFor(event.capacity, confirmed);
     if (existing) await tx.registration.update({ where: { id: existing.id }, data: { status, cancelledAt: null, registeredAt: now } });
     else await tx.registration.create({ data: { eventId, userId: actor.id, status, registeredAt: now } });
@@ -70,6 +95,7 @@ export async function registerForEvent(actor: Actor, eventId: string, clock: Clo
 
 /** Cancels the user's own registration (allowed until the event ends) and promotes the next person on the waiting list. */
 export async function cancelRegistration(actor: Actor, eventId: string, clock: Clock = realClock): Promise<{ cancelled: boolean }> {
+  await enforceRateLimits([{ scope: "event-registration:user", id: actor.id, policy: POLICIES.eventRegistrationUser }], clock.now());
   return getDb().$transaction(async (tx) => {
     if (!(await lockEvent(tx, eventId))) throw notFound("Event");
     const reg = await tx.registration.findUnique({
@@ -105,7 +131,7 @@ export async function listMyRegistrations(userId: string) {
       event: {
         select: {
           id: true, slug: true, title: true, category: true, status: true, startsAt: true, endsAt: true,
-          registrationClosesAt: true, submissionDeadline: true, timezone: true, locationType: true,
+          registrationClosesAt: true, submissionDeadline: true, timezone: true, locationType: true, resultsPublishedAt: true, registrationMode: true,
         },
       },
     },

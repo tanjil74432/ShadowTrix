@@ -11,10 +11,10 @@ Each milestone ends with: tests passing, docs updated, completion criteria met. 
 | 5 | Event discovery & registration | Explore, details, filters, register, capacity | Capacity race test passes; status logic unit-tested | **Done locally** on `feature/milestone-5-6-events-dashboards` (built together with M6; see [milestone-5-6-report.md](milestone-5-6-report.md)). Public listing, search, details, lifecycle, registration with capacity and waiting list. Awaiting review |
 | 6 | Dashboards | Participant and organizer dashboards, announcements | E2E: create event → register → announce | **Done locally** (same branch) except **announcements**, which are not built (no announcement UI or email yet). Participant and organizer dashboards, settings, role-aware navigation. Awaiting review |
 | 6a | Organization module | Our Team page, member profiles, admin CRUD, photo upload, terms, archive | Public pages render from DB; placeholder labeling; email privacy verified | Planned (can run parallel with 6) |
-| 7 | Teams & submissions | Teams, invitations, project submission, deadlines | E2E team flow; deadline enforced server-side | Planned |
-| 8 | Judging & certificates | Criteria, scoring, results, leaderboard, certificates + verification | Result calculation tests; certificate verify page | Planned |
-| 9 | Admin & analytics | User/event/judge mgmt UI, analytics, settings, audit-log viewer | Admin-only access tested; audit entries verified | Planned (the user-management API already exists) |
-| 10 | Hardening & deployment | Security review, CSP, performance, backups, scheduled cleanup, deploy docs | Independent security review; dependency audit clean; load test baseline; runbook | Planned |
+| 7 | Teams & submissions | Teams, invitations, project submission, deadlines | E2E team flow; deadline enforced server-side | **Done locally** (uncommitted, built with M8 on top of the M5/6 branch; see [milestone-7-report.md](milestone-7-report.md)). Awaiting review |
+| 8 | Judging & certificates | Criteria, scoring, results, leaderboard, certificates + verification | Result calculation tests; certificate verify page | **Done locally** (uncommitted; see [milestone-8-report.md](milestone-8-report.md)). Awaiting review |
+| 9 | Admin & analytics | User/event/judge mgmt UI, analytics, settings, audit-log viewer | Admin-only access tested; audit entries verified | **Done locally** (uncommitted; see [milestone-9-report.md](milestone-9-report.md)). Awaiting review |
+| 10 | QA & deployment | Quality assurance, security review, performance, deployment readiness | Tests, review and runbooks documented | **Done locally** (uncommitted; see [milestone-10-report.md](milestone-10-report.md)); real deployment not started. Awaiting review |
 
 ## Carried forward from Milestone 4 (see [milestone-4-report.md](milestone-4-report.md))
 

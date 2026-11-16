@@ -33,7 +33,7 @@ export function SectionHeading({
       )}
     >
       <div className={cn("max-w-2xl", align === "center" && "mx-auto")}>
-        {eyebrow && <p className="mb-3 text-sm font-medium text-fg-muted">{eyebrow}</p>}
+        {eyebrow && <p className="mb-3 text-sm font-medium text-accent-soft">{eyebrow}</p>}
         <Heading id={id} className={cn("text-balance font-semibold", Heading === "h1" ? "text-h1" : "text-h2")}>
           {title}
         </Heading>

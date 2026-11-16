@@ -5,9 +5,9 @@ import { getDb } from "@/server/db/client";
 import { AppError, conflict, forbidden, notFound } from "@/server/http/errors";
 import { writeAudit } from "@/server/modules/audit/audit.service";
 import { canCreateEvents, canManageEvent, hasGlobalRole, type Actor } from "@/server/modules/authz/permissions";
-import { timelineIssues, type CreateEventInput, type EventStatusAction, type UpdateEventInput } from "./event.schema";
+import { teamIssues, timelineIssues, type CreateEventInput, type EventStatusAction, type UpdateEventInput } from "./event.schema";
 import { nextState, slugify } from "./event-lifecycle";
-import { lockEvent, promoteWaitlist } from "./registrations.service";
+import { confirmedSeats, lockEvent, promoteWaitlist } from "./registrations.service";
 
 type Tx = Prisma.TransactionClient;
 export interface Clock {
@@ -22,20 +22,18 @@ const PUBLIC_SELECT = {
   id: true, slug: true, title: true, category: true, summary: true, description: true, coverImageUrl: true, status: true,
   startsAt: true, endsAt: true, registrationOpensAt: true, registrationClosesAt: true, submissionDeadline: true,
   judgingStartsAt: true, judgingEndsAt: true, resultsAnnouncementAt: true, registrationManuallyClosed: true, capacity: true,
-  registrationMode: true, eligibility: true, locationType: true, location: true, timezone: true,
+  registrationMode: true, minTeamSize: true, maxTeamSize: true, resultsPublishedAt: true, eligibility: true, locationType: true, location: true, timezone: true,
   hosts: { select: { role: true, organization: { select: { name: true, slug: true } } } },
 } satisfies Prisma.EventSelect;
 
 export type PublicEvent = Prisma.EventGetPayload<{ select: typeof PUBLIC_SELECT }> & { confirmedCount: number };
 
-async function withCounts<T extends { id: string }>(events: T[]): Promise<(T & { confirmedCount: number })[]> {
+/** `confirmedCount` is the number of places taken: people for individual events, teams for team events. */
+async function withCounts<T extends { id: string; registrationMode: "INDIVIDUAL" | "TEAM" }>(events: T[]): Promise<(T & { confirmedCount: number })[]> {
   if (events.length === 0) return [];
-  const rows = await getDb().registration.groupBy({
-    by: ["eventId"],
-    where: { eventId: { in: events.map((e) => e.id) }, status: "CONFIRMED" },
-    _count: { _all: true },
-  });
-  const counts = new Map(rows.map((r) => [r.eventId, r._count._all]));
+  const db = getDb();
+  const counts = new Map<string, number>();
+  await Promise.all(events.map(async (e) => counts.set(e.id, await confirmedSeats(db, e.id, e.registrationMode))));
   return events.map((e) => ({ ...e, confirmedCount: counts.get(e.id) ?? 0 }));
 }
 
@@ -109,7 +107,9 @@ export async function createEvent(actor: Actor, input: CreateEventInput) {
         location: input.location ?? null,
         eligibility: input.eligibility ?? null,
         timezone: "UTC",
-        registrationMode: "INDIVIDUAL",
+        registrationMode: input.registrationMode ?? "INDIVIDUAL",
+        minTeamSize: input.registrationMode === "TEAM" ? (input.minTeamSize ?? null) : null,
+        maxTeamSize: input.registrationMode === "TEAM" ? (input.maxTeamSize ?? null) : null,
         status: "DRAFT",
         createdById: actor.id,
         organizers: { create: { userId: actor.id, isLead: true } },
@@ -124,12 +124,14 @@ export async function createEvent(actor: Actor, input: CreateEventInput) {
 const EDITABLE = [
   "title", "category", "summary", "description", "startsAt", "endsAt", "registrationOpensAt", "registrationClosesAt",
   "submissionDeadline", "judgingStartsAt", "judgingEndsAt", "resultsAnnouncementAt", "capacity", "locationType", "location", "eligibility",
+  "registrationMode", "minTeamSize", "maxTeamSize",
 ] as const;
 
 export async function updateEvent(actor: Actor, eventId: string, input: UpdateEventInput) {
   return getDb().$transaction(async (tx) => {
+    await loadManagedEvent(actor, eventId, tx); // authorize BEFORE locking, so nobody can stall an event by calling this without access
     await lockEvent(tx, eventId);
-    const event = await loadManagedEvent(actor, eventId, tx);
+    const event = await loadManagedEvent(actor, eventId, tx); // re-read under the lock
     if (event.status === "CANCELLED" || event.status === "ARCHIVED") throw conflict("A cancelled or archived event can no longer be edited.");
 
     // The merged timeline must still satisfy the same rules the database enforces.
@@ -144,9 +146,29 @@ export async function updateEvent(actor: Actor, eventId: string, input: UpdateEv
     });
     if (issues.length) throw new AppError(400, "invalid_timeline", issues[0].message);
 
+    // Registration mode and team size limits cannot change once people or teams depend on them.
+    const modeOrSizeChange =
+      (input.registrationMode !== undefined && input.registrationMode !== event.registrationMode) ||
+      (input.minTeamSize !== undefined && input.minTeamSize !== event.minTeamSize) ||
+      (input.maxTeamSize !== undefined && input.maxTeamSize !== event.maxTeamSize);
+    if (modeOrSizeChange) {
+      const dependants = (await tx.registration.count({ where: { eventId } })) + (await tx.team.count({ where: { eventId } }));
+      if (dependants > 0) throw conflict("Registrations or teams already exist, so the registration mode and team sizes can no longer be changed.");
+      const merged = {
+        registrationMode: input.registrationMode ?? event.registrationMode,
+        minTeamSize: input.minTeamSize !== undefined ? input.minTeamSize : event.minTeamSize,
+        maxTeamSize: input.maxTeamSize !== undefined ? input.maxTeamSize : event.maxTeamSize,
+      };
+      const teamProblems = teamIssues(merged);
+      if (teamProblems.length) throw new AppError(400, "invalid_team_size", teamProblems[0].message);
+      if (merged.registrationMode === "INDIVIDUAL") {
+        input.minTeamSize = null;
+        input.maxTeamSize = null;
+      }
+    }
     if (input.capacity !== undefined && input.capacity !== null) {
-      const confirmed = await tx.registration.count({ where: { eventId, status: "CONFIRMED" } });
-      if (input.capacity < confirmed) throw conflict(`${confirmed} people are already confirmed, so the capacity cannot be lower than ${confirmed}.`);
+      const confirmed = await confirmedSeats(tx, eventId, event.registrationMode);
+      if (input.capacity < confirmed) throw conflict(`${confirmed} ${event.registrationMode === "TEAM" ? "teams are" : "people are"} already confirmed, so the capacity cannot be lower than ${confirmed}.`);
     }
 
     const data: Record<string, unknown> = {};
@@ -162,6 +184,7 @@ const VERB: Record<EventStatusAction, string> = { publish: "published", unpublis
 
 export async function setEventStatus(actor: Actor, eventId: string, action: EventStatusAction, clock: Clock = realClock) {
   return getDb().$transaction(async (tx) => {
+    await loadManagedEvent(actor, eventId, tx); // authorize before locking (see updateEvent)
     await lockEvent(tx, eventId);
     const event = await loadManagedEvent(actor, eventId, tx);
     const to = nextState(event.status, action);

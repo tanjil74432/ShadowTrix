@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { CloseIcon, MenuIcon } from "@/components/ui/icons";
 import { nav, site } from "@/lib/site";
 
-const linkClass = "block rounded-md px-3 py-3 text-lg font-medium text-fg hover:bg-surface-raised";
+const linkClass = "block rounded-lg px-3 py-3 text-lg font-medium text-fg transition-colors duration-(--duration-fast) hover:bg-accent-wash hover:text-accent-soft";
 
 /**
  * Full-height dialog menu for small screens. Radix provides focus trapping, Escape to close and focus return.
@@ -33,9 +33,9 @@ export function MobileMenu({ account }: { account: ReactNode }) {
         </Button>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/80" />
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/75 backdrop-blur-[2px] data-[state=open]:animate-[page-in_160ms_ease-out_both]" />
         <Dialog.Content
-          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-sm flex-col bg-surface p-4 shadow-overlay"
+          className="glass fixed inset-y-0 right-0 z-50 flex w-full max-w-sm flex-col border-r-0 border-y-0 p-4"
           aria-describedby={undefined}
         >
           <div className="flex items-center justify-between">

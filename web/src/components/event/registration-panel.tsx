@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { rateLimitMessage, sendJson } from "@/components/auth/api";
 import { FormAlert, FormNotice } from "@/components/auth/form-parts";
+import { useHydrated } from "@/components/common/use-hydrated";
 import { Button } from "@/components/ui/button";
 
 export type RegistrationView =
@@ -17,6 +18,7 @@ export type RegistrationView =
 export function RegistrationPanel({ eventId, view }: { eventId: string; view: RegistrationView }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
+  const hydrated = useHydrated(); // buttons stay disabled until the page is interactive, so an early tap is never lost
   const [error, setError] = useState<string | null>(null);
 
   async function run(method: "POST" | "DELETE") {
@@ -48,7 +50,7 @@ export function RegistrationPanel({ eventId, view }: { eventId: string; view: Re
       {view.kind === "open" && (
         <>
           <p className="text-fg-muted">{view.full ? "This event is full. You can join the waiting list and will be confirmed automatically if a place opens." : "Reserve your place. You can cancel any time before the event ends."}</p>
-          <Button size="lg" className="w-full" onClick={() => run("POST")} disabled={pending} aria-disabled={pending}>
+          <Button size="lg" className="w-full" onClick={() => run("POST")} disabled={pending || !hydrated} aria-disabled={pending || !hydrated}>
             {pending ? "Registering" : view.full ? "Join the waiting list" : "Register for this event"}
           </Button>
         </>
@@ -57,7 +59,7 @@ export function RegistrationPanel({ eventId, view }: { eventId: string; view: Re
         <>
           <FormNotice>{view.status === "CONFIRMED" ? "You are registered. Your place is confirmed." : "You are on the waiting list. You will be confirmed automatically if a place opens."}</FormNotice>
           {view.canCancel && (
-            <Button variant="secondary" className="w-full" onClick={() => run("DELETE")} disabled={pending} aria-disabled={pending}>
+            <Button variant="secondary" className="w-full" onClick={() => run("DELETE")} disabled={pending || !hydrated} aria-disabled={pending || !hydrated}>
               {pending ? "Cancelling" : "Cancel my registration"}
             </Button>
           )}

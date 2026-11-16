@@ -7,11 +7,11 @@ export function SampleNotice({ children, className }: { children: ReactNode; cla
     <p
       role="note"
       className={cn(
-        "rounded-md border border-dashed border-border-strong bg-surface px-4 py-3 text-sm text-fg-muted",
+        "rounded-md border border-dashed border-accent/35 bg-accent-wash/60 px-4 py-3 text-sm text-fg-muted",
         className,
       )}
     >
-      <strong className="font-semibold text-fg">Sample content. </strong>
+      <strong className="font-semibold text-accent-soft">Sample content. </strong>
       {children}
     </p>
   );

@@ -33,7 +33,7 @@ async function ManageGate({ params }: { params: Params }) {
   const valid = z.uuid().safeParse(id);
   if (!valid.success) notFound();
   return (
-    <ProtectedArea permission="event:manage" returnTo={`/organizer/events/${valid.data}`} area="this event">
+    <ProtectedArea anyRole="ORGANIZER" returnTo={`/organizer/events/${valid.data}`} area="this event">
       <Container className="py-14 sm:py-20">
         <ManageContent id={valid.data} />
       </Container>
@@ -59,6 +59,7 @@ async function ManageContent({ id }: { id: string }) {
     startsAt: local(event.startsAt), endsAt: local(event.endsAt), registrationOpensAt: local(event.registrationOpensAt), registrationClosesAt: local(event.registrationClosesAt),
     submissionDeadline: local(event.submissionDeadline), judgingStartsAt: local(event.judgingStartsAt), judgingEndsAt: local(event.judgingEndsAt), resultsAnnouncementAt: local(event.resultsAnnouncementAt),
     capacity: event.capacity == null ? "" : String(event.capacity), locationType: event.locationType, location: event.location ?? "", eligibility: event.eligibility ?? "",
+    registrationMode: event.registrationMode, minTeamSize: event.minTeamSize == null ? "" : String(event.minTeamSize), maxTeamSize: event.maxTeamSize == null ? "" : String(event.maxTeamSize),
   };
   const editable = event.status === "DRAFT" || event.status === "PUBLISHED";
 
@@ -72,6 +73,11 @@ async function ManageContent({ id }: { id: string }) {
       {(event.status === "PUBLISHED" || event.status === "CANCELLED") && (
         <p className="mt-2"><Link href={`/events/${event.slug}`} className="underline underline-offset-4 text-fg-muted">View public page</Link></p>
       )}
+
+      <nav aria-label="Event management" className="mt-6 flex flex-wrap gap-2">
+        <Link href={`/organizer/events/${event.id}/judging`} className="rounded-md bg-surface px-3 py-2 text-sm font-medium shadow-card underline-offset-4 hover:underline">Judging: criteria, judges, submissions</Link>
+        <Link href={`/organizer/events/${event.id}/results`} className="rounded-md bg-surface px-3 py-2 text-sm font-medium shadow-card underline-offset-4 hover:underline">Results and certificates</Link>
+      </nav>
 
       <section aria-labelledby="status-heading" className="mt-10 space-y-4">
         <h2 id="status-heading" className="text-h3 font-semibold">Publishing</h2>

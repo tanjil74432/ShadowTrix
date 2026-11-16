@@ -33,6 +33,11 @@ export function CategoryCover({ seed, className }: { seed: string; className?: s
     });
   });
 
+  // Roughly every third node is orange; the first orange nodes breathe and one edge carries a slow pulse of light.
+  const hot = new Set(nodes.map((_, i) => i).filter((i) => i % 3 === 0));
+  const flowEdge = edges.length > 2 ? 1 : -1;
+  const glow = nodes[Math.floor(rand() * nodes.length)];
+
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
@@ -45,14 +50,40 @@ export function CategoryCover({ seed, className }: { seed: string; className?: s
         <pattern id={`g-${seed}`} width="20" height="20" patternUnits="userSpaceOnUse">
           <path d="M20 0H0V20" fill="none" stroke="white" strokeOpacity="0.06" />
         </pattern>
+        <radialGradient id={`o-${seed}`} cx={glow.x} cy={glow.y} r="130" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#d95f1b" stopOpacity="0.34" />
+          <stop offset="1" stopColor="#d95f1b" stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id={`f-${seed}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0.6" stopColor="#141414" stopOpacity="0" />
+          <stop offset="1" stopColor="#141414" stopOpacity="0.9" />
+        </linearGradient>
       </defs>
+      <rect width={W} height={H} fill="#0e0e0e" />
+      <rect width={W} height={H} fill={`url(#o-${seed})`} />
       <rect width={W} height={H} fill={`url(#g-${seed})`} />
-      {edges.map(([a, b]) => (
-        <line key={`${a}-${b}`} x1={nodes[a].x} y1={nodes[a].y} x2={nodes[b].x} y2={nodes[b].y} stroke="white" strokeOpacity="0.28" strokeWidth="0.8" />
-      ))}
-      {nodes.map((n, i) => (
-        <circle key={i} cx={n.x} cy={n.y} r={n.r} fill="white" fillOpacity={0.55 + (i % 3) * 0.15} />
-      ))}
+      {edges.map(([a, b]) => {
+        const lit = hot.has(a) || hot.has(b);
+        return (
+          <line key={`${a}-${b}`} x1={nodes[a].x} y1={nodes[a].y} x2={nodes[b].x} y2={nodes[b].y}
+            stroke={lit ? "#f07832" : "white"} strokeOpacity={lit ? 0.5 : 0.2} strokeWidth="0.8" />
+        );
+      })}
+      {flowEdge >= 0 && (
+        <line x1={nodes[edges[flowEdge][0]].x} y1={nodes[edges[flowEdge][0]].y} x2={nodes[edges[flowEdge][1]].x} y2={nodes[edges[flowEdge][1]].y}
+          stroke="#ff9a55" strokeOpacity="0.9" strokeWidth="1.2" strokeDasharray="6 34" className="animate-edge-flow" />
+      )}
+      {nodes.map((n, i) =>
+        hot.has(i) ? (
+          <g key={i}>
+            <circle cx={n.x} cy={n.y} r={n.r + 3} fill="#f07832" className={i === 0 ? "animate-node-pulse [transform-box:fill-box] origin-center" : undefined} fillOpacity={i === 0 ? undefined : 0.18} />
+            <circle cx={n.x} cy={n.y} r={n.r + 0.4} fill="#f07832" />
+          </g>
+        ) : (
+          <circle key={i} cx={n.x} cy={n.y} r={n.r} fill="white" fillOpacity={0.5 + (i % 3) * 0.15} />
+        ),
+      )}
+      <rect width={W} height={H} fill={`url(#f-${seed})`} />
     </svg>
   );
 }

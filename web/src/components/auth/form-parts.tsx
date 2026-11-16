@@ -19,7 +19,7 @@ export function FormAlert({ children }: { children: ReactNode }) {
 /** Neutral confirmation (role="status": announced politely). */
 export function FormNotice({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div role="status" className={cn("rounded-md border border-border-strong bg-surface-raised px-4 py-3 text-sm text-silver", className)}>
+    <div role="status" className={cn("rounded-md border border-accent/40 border-l-4 border-l-accent bg-accent-wash px-4 py-3 text-sm text-silver", className)}>
       {children}
     </div>
   );

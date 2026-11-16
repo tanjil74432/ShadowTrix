@@ -82,6 +82,14 @@ export function canManageEvent(actor: Actor | null | undefined, eventId: string,
   return hasGlobalRole(actor, "ORGANIZER") && organizerIds.includes(actor.id);
 }
 
+/**
+ * True when the actor holds the role in ANY scope (platform-wide or for one event). Used only to decide whether to show an
+ * area such as the judge or organizer dashboard; every resource inside is still authorized individually and server-side.
+ */
+export function hasAnyRole(actor: Actor | null | undefined, role: Role): boolean {
+  return !!actor?.roles.some((g) => g.role === role) || hasGlobalRole(actor, "ADMIN");
+}
+
 /** Who may create events at all: administrators and platform-wide organizers (an event-scoped grant cannot create new events). */
 export function canCreateEvents(actor: Actor | null | undefined): boolean {
   return hasGlobalRole(actor, "ADMIN") || hasGlobalRole(actor, "ORGANIZER");

@@ -14,7 +14,7 @@ interface ErrorBody {
   error?: { code?: string; message?: string; issues?: { path: (string | number)[]; message: string }[] };
 }
 
-export async function sendJson(url: string, body?: unknown, method: "POST" | "DELETE" | "PATCH" = "POST"): Promise<ApiResult> {
+export async function sendJson(url: string, body?: unknown, method: "POST" | "DELETE" | "PATCH" | "PUT" = "POST"): Promise<ApiResult> {
   let res: Response;
   try {
     res = await fetch(url, {

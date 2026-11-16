@@ -20,7 +20,7 @@ export const metadata: Metadata = { title: "Organizer dashboard", robots: { inde
 export default function OrganizerPage() {
   return (
     <Suspense fallback={<Container className="py-14"><Skeleton className="h-96 w-full" /></Container>}>
-      <ProtectedArea permission="event:manage" returnTo="/organizer" area="the organizer dashboard">
+      <ProtectedArea anyRole="ORGANIZER" returnTo="/organizer" area="the organizer dashboard">
         <Container className="py-14 sm:py-20">
           <Suspense fallback={<Skeleton className="h-96 w-full" />}>
             <OrganizerContent />

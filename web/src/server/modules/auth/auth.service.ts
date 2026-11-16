@@ -17,6 +17,7 @@ import { enforceRateLimits, POLICIES } from "@/server/security/rate-limit";
 import { generateToken, hashToken } from "@/server/security/tokens";
 import { ZodError } from "zod";
 import { passwordIssues, type CompleteRegistrationInput, type LoginInput, type RegisterInput } from "./auth.schema";
+import { getSignupsEnabled } from "@/server/modules/admin/admin-management.service";
 import { checkSecondFactor, isMfaEnabled } from "./mfa.service";
 import { burnPasswordVerification, hashPassword, needsRehash, verifyPassword } from "./password";
 import { createSession, revokeAllUserSessions, revokeSessionByToken, type SessionLimits, type SessionUser } from "./session.service";
@@ -112,6 +113,8 @@ function queueMail(deps: AuthDeps, mail: Mail) {
  *  - verified existing   -> an "you already have an account" email to the real owner; nothing changes
  */
 export async function registerUser(input: RegisterInput, ctx: RequestContext, deps: AuthDeps = defaultDeps()): Promise<void> {
+  // Administrators can pause new sign-ups (platform setting). Existing accounts and logins are unaffected.
+  if (!(await getSignupsEnabled())) throw new AppError(503, "signups_paused", "New registrations are paused for now. Please try again later.");
   await enforceRateLimits(
     [
       { scope: "register:email", id: input.email, policy: POLICIES.registerEmail },

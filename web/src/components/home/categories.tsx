@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Container } from "@/components/ui/container";
+import { ArrowRightIcon } from "@/components/ui/icons";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { EVENT_CATEGORIES, FOCUS_AREA_GROUPS, type EventCategoryKey } from "@/lib/event-categories";
 
@@ -7,7 +8,7 @@ const categoryKeys = Object.keys(EVENT_CATEGORIES).filter((k) => k !== "OTHER") 
 
 export function Categories() {
   return (
-    <section aria-labelledby="categories-title" className="border-y border-border bg-surface py-section">
+    <section aria-labelledby="categories-title" className="ambient-left border-y border-border bg-surface py-section">
       <Container>
         <SectionHeading
           id="categories-title"
@@ -18,13 +19,14 @@ export function Categories() {
         <h3 className="mt-12 text-h3 font-semibold">Event formats</h3>
         <ul className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {categoryKeys.map((key) => (
-            <li key={key} className="rounded-lg bg-surface-raised shadow-card transition-shadow duration-(--duration-base) hover:shadow-card-hover focus-within:shadow-card-hover">
-              <Link
-                href={`/events?category=${key.toLowerCase()}`}
-                className="group block h-full rounded-lg p-5"
-              >
-                <span className="font-medium">{EVENT_CATEGORIES[key].label}</span>
-                <span className="mt-1.5 block text-sm text-fg-muted text-pretty">{EVENT_CATEGORIES[key].description}</span>
+            <li key={key} className="group panel-orange rounded-lg transition-[border-color,box-shadow,transform] duration-(--duration-base) hover:-translate-y-0.5 focus-within:border-accent/70 motion-reduce:hover:translate-y-0">
+              <Link href={`/events?category=${key.toLowerCase()}`} className="block h-full rounded-lg p-5">
+                <span className="flex items-center justify-between gap-2 font-semibold text-accent-soft">
+                  {EVENT_CATEGORIES[key].label}
+                  <ArrowRightIcon className="shrink-0 text-accent transition-transform duration-(--duration-fast) group-hover:translate-x-0.5 motion-reduce:transition-none" />
+                </span>
+                <span aria-hidden className="mt-2 block h-0.5 w-8 rounded-full bg-gradient-to-r from-accent to-accent-soft" />
+                <span className="mt-2.5 block text-sm text-silver/85 text-pretty">{EVENT_CATEGORIES[key].description}</span>
               </Link>
             </li>
           ))}
@@ -40,7 +42,7 @@ export function Categories() {
                   <li key={area.slug}>
                     <Link
                       href={`/events?focus=${area.slug}`}
-                      className="-mx-2 block rounded-md px-2 py-1.5 text-fg-muted transition-colors duration-(--duration-fast) hover:bg-surface-raised hover:text-fg"
+                      className="-mx-2 block rounded-md px-2 py-1.5 text-fg-muted transition-colors duration-(--duration-fast) hover:bg-accent-wash hover:text-accent-soft"
                     >
                       {area.label}
                     </Link>

@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { randomBytes } from "node:crypto";
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 3011; // separate from the dev port (3010) so tests never collide with a running dev server
 export const E2E_ORIGIN = `http://localhost:${PORT}`;
@@ -18,17 +18,29 @@ export default defineConfig({
   // so keep concurrency modest and budgets realistic.
   workers: 2,
   timeout: 60_000,
-  expect: { timeout: 10_000 },
+  expect: { timeout: 15_000 }, // a shared machine, a production server and 64 MiB Argon2 hashes: 10 s was occasionally too tight under two workers
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   // In CI the "github" reporter turns failures into annotations that are visible on the run without log access.
   reporter: process.env.CI ? [["list"], ["github"]] : [["list"]],
   use: {
     baseURL: E2E_ORIGIN,
-    // Locally use the installed Microsoft Edge (no browser download). CI installs Playwright's Chromium.
-    channel: process.env.CI ? undefined : "msedge",
     trace: "retain-on-failure",
   },
+  /**
+   * `chromium` is the full suite (the installed Microsoft Edge locally, Playwright's Chromium in CI). The `x-*` projects run
+   * only the cross-browser journeys (e2e/cross-browser.spec.ts) in Chromium, Firefox and WebKit at desktop, tablet and phone
+   * sizes: `npm run test:e2e:cross` (needs `npx playwright install firefox webkit`).
+   */
+  projects: [
+    { name: "chromium", testIgnore: /cross-browser\.spec\.ts/, use: { channel: process.env.CI ? undefined : "msedge" } },
+    { name: "x-chromium-desktop", testMatch: /cross-browser\.spec\.ts/, use: { ...devices["Desktop Chrome"], channel: process.env.CI ? undefined : "msedge" } },
+    { name: "x-firefox-desktop", testMatch: /cross-browser\.spec\.ts/, use: { ...devices["Desktop Firefox"] } },
+    { name: "x-webkit-desktop", testMatch: /cross-browser\.spec\.ts/, use: { ...devices["Desktop Safari"] } },
+    { name: "x-webkit-tablet", testMatch: /cross-browser\.spec\.ts/, use: { ...devices["iPad (gen 7)"] } },
+    { name: "x-webkit-phone", testMatch: /cross-browser\.spec\.ts/, use: { ...devices["iPhone 13"] } },
+    { name: "x-chromium-phone", testMatch: /cross-browser\.spec\.ts/, use: { ...devices["Pixel 7"], channel: process.env.CI ? undefined : "msedge" } },
+  ],
   // Tests run against a production build made with the SAME environment as the server that serves it
   // (APP_URL is baked into the prerendered metadata, so build and runtime values must agree).
   // Requires PostgreSQL (migrated) and Mailpit.
@@ -45,6 +57,8 @@ export default defineConfig({
       AUTH_SECRET: randomBytes(48).toString("base64url"),
       TRUST_PROXY: "false",
       CRON_SECRET: process.env.E2E_CRON_SECRET,
+      // Uploaded files of the e2e server go to a throwaway directory that the global cleanup removes.
+      STORAGE_LOCAL_DIR: ".e2e-storage",
     },
   },
 });

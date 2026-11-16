@@ -304,7 +304,7 @@ test.describe("organizer dashboard and event management", () => {
     const body = {
       title: `Smuggled ${tag()}`, category: "WORKSHOP", summary: "A summary that is long enough.", description: "A description that is long enough to pass.",
       registrationOpensAt: `${year}-01-01T00:00:00.000Z`, registrationClosesAt: `${year}-02-01T00:00:00.000Z`, startsAt: `${year}-02-10T00:00:00.000Z`, endsAt: `${year}-02-11T00:00:00.000Z`,
-      status: "PUBLISHED", slug: "evil-slug", createdById: owner.id, registrationMode: "TEAM", capacity: 3,
+      status: "PUBLISHED", slug: "evil-slug", createdById: owner.id, capacity: 3,
     };
     const res = await post(request, "/api/v1/events", body, await asUser(other));
     expect(res.status()).toBe(201);

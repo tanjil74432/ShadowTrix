@@ -1,71 +1,54 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { connection } from "next/server";
 import { Suspense } from "react";
-import { ProtectedArea } from "@/components/auth/protected-area";
-import { Badge } from "@/components/ui/badge";
+import { AdminShell } from "@/components/admin/admin-shell";
 import { Container } from "@/components/ui/container";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ROLE_LABEL } from "@/lib/roles";
-import { listUsers } from "@/server/modules/admin/admin-users.service";
-import { getCurrentUser } from "@/server/modules/auth/dal";
+import { formatDateTime } from "@/lib/format";
+import { requireUser } from "@/server/modules/auth/dal";
+const fallback = <Container className="py-14"><Skeleton className="h-96 w-full" /></Container>;
+import { listAuditLog, auditQuerySchema } from "@/server/modules/admin/admin-management.service";
+import { getAnalytics } from "@/server/modules/analytics/analytics.service";
 
 export const metadata: Metadata = { title: "Administration", robots: { index: false, follow: false } };
 
 export default function AdminPage() {
   return (
-    <Suspense fallback={<Container className="py-14"><Skeleton className="h-64 w-full" /></Container>}>
-      <ProtectedArea permission="admin:access" returnTo="/admin" area="administration">
-        <Container className="py-14 sm:py-20">
-          <h1 className="text-h1 font-semibold">Administration</h1>
-          <p className="mt-3 max-w-2xl text-fg-muted text-pretty">
-            Read-only user list. Roles and account status are managed through the administrator API for now; a management interface arrives with the admin dashboard milestone.
-          </p>
-          <UsersTable />
-        </Container>
-      </ProtectedArea>
+    <Suspense fallback={fallback}>
+      <AdminShell section="overview" returnTo="/admin"><Overview /></AdminShell>
     </Suspense>
   );
 }
 
-/** Only rendered after ProtectedArea has allowed the request, and it re-checks permission inside the service. */
-async function UsersTable() {
-  const actor = (await getCurrentUser())!;
-  const { items, total } = await listUsers(actor, { page: 1, pageSize: 25 });
+async function Overview() {
+  const actor = await requireUser("/admin");
+  await connection();
+  const [a, security] = await Promise.all([getAnalytics(actor, {}), listAuditLog(actor, auditQuerySchema.parse({ view: "security", pageSize: 5 }))]);
+  const cards: [string, number | string][] = [
+    ["Users", a.users.total], ["Published events", a.events.byStatus.PUBLISHED ?? 0], ["Draft events", a.events.byStatus.DRAFT ?? 0],
+    [`Registrations (${a.range.days} days)`, a.registrations.inRange.CONFIRMED + a.registrations.inRange.WAITLISTED + a.registrations.inRange.PENDING],
+    ["Active teams", a.teams.active], ["Judging completion", a.judging.completionPercent === null ? "n/a" : `${a.judging.completionPercent}%`],
+  ];
   return (
-    <div className="mt-10">
-      <p className="mb-3 text-sm text-fg-muted">
-        Showing {items.length} of {total} users
-      </p>
-      <div tabIndex={0} role="region" aria-label="Registered users (scrollable table)" className="overflow-x-auto rounded-lg shadow-card">
-        <table className="w-full min-w-[40rem] text-left text-sm">
-          <caption className="sr-only">Registered users</caption>
-          <thead className="bg-surface-raised text-fg-muted">
-            <tr>
-              <th scope="col" className="px-4 py-3 font-medium">Name</th>
-              <th scope="col" className="px-4 py-3 font-medium">Email</th>
-              <th scope="col" className="px-4 py-3 font-medium">Roles</th>
-              <th scope="col" className="px-4 py-3 font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border bg-surface">
-            {items.map((u) => (
-              <tr key={u.id}>
-                <td className="px-4 py-3 font-medium">{u.fullName}</td>
-                <td className="px-4 py-3 break-all text-fg-muted">{u.email}</td>
-                <td className="px-4 py-3">
-                  <span className="flex flex-wrap gap-1.5">
-                    {[...new Set(u.roles.map((r) => r.role))].map((r) => (
-                      <Badge key={r}>{ROLE_LABEL[r] ?? r}</Badge>
-                    ))}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  {u.status === "SUSPENDED" ? "Suspended" : u.emailVerified ? "Active" : "Awaiting email confirmation"}
-                </td>
-              </tr>
+    <>
+      <h1 className="text-h1 font-semibold">Administration</h1>
+      <p className="mt-2 max-w-2xl text-fg-muted">Figures come straight from the database. See Analytics for a date range and breakdowns.</p>
+      <dl className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {cards.map(([label, v]) => (
+          <div key={label} className="rounded-lg bg-surface p-5 shadow-card"><dt className="text-sm text-fg-subtle">{label}</dt><dd className="mt-1 text-h2 font-semibold">{v}</dd></div>
+        ))}
+      </dl>
+      <section aria-labelledby="recent-heading" className="mt-12">
+        <div className="flex items-baseline justify-between gap-4"><h2 id="recent-heading" className="text-h3 font-semibold">Recent security events</h2><Link href="/admin/audit?view=security" className="text-sm underline underline-offset-4">All security events</Link></div>
+        {security.items.length === 0 ? <p className="mt-4 text-fg-muted">Nothing recorded yet.</p> : (
+          <ul className="mt-4 space-y-2">
+            {security.items.map((i) => (
+              <li key={i.id} className="rounded-lg bg-surface p-3 text-sm shadow-card"><span className="font-medium">{i.action}</span> <span className="text-fg-muted">by {i.actor?.fullName ?? "system"} on <time dateTime={i.createdAt.toISOString()}>{formatDateTime(i.createdAt, "UTC")}</time></span></li>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          </ul>
+        )}
+      </section>
+    </>
   );
 }

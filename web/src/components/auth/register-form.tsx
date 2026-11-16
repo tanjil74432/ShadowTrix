@@ -52,7 +52,7 @@ export function RegisterForm() {
         {(p) => <Input {...p} name="email" type="email" autoComplete="email" inputMode="email" />}
       </Field>
       <Button type="submit" size="lg" className="w-full" disabled={pending} aria-disabled={pending}>
-        {pending ? <Spinner label="Sending link" className="text-bg" /> : "Send confirmation link"}
+        {pending ? <Spinner label="Sending link" className="text-on-accent" /> : "Send confirmation link"}
       </Button>
     </form>
   );

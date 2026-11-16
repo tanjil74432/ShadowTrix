@@ -22,7 +22,7 @@ export function EventTimeline({ timeline, timezone, className }: EventTimelinePr
             aria-hidden
             className={cn(
               "absolute top-1.5 -left-[1.9rem] size-2.5 rounded-full border border-fg-muted",
-              row.scheduled ? "bg-fg" : "bg-bg",
+              row.scheduled ? "border-accent bg-accent" : "bg-bg",
             )}
           />
           <p className="font-medium">{row.label}</p>

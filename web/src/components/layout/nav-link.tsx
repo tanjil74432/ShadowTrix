@@ -14,8 +14,9 @@ export function NavLink({ href, className, ...props }: ComponentProps<typeof Lin
       href={href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "rounded-md px-3 py-2 text-sm font-medium transition-colors duration-(--duration-fast)",
-        active ? "text-fg" : "text-fg-muted hover:text-fg",
+        "relative rounded-md px-3 py-2 text-sm font-medium transition-colors duration-(--duration-fast)",
+        "after:absolute after:inset-x-3 after:-bottom-0.5 after:h-0.5 after:origin-left after:scale-x-0 after:rounded-full after:bg-accent after:transition-transform after:duration-(--duration-base) hover:after:scale-x-100 motion-reduce:after:transition-none",
+        active ? "text-fg after:scale-x-100" : "text-fg-muted hover:text-accent-soft",
         className,
       )}
       {...props}

@@ -3,7 +3,7 @@ import { unstable_rethrow } from "next/navigation";
 import { ZodError, type ZodType } from "zod";
 import { getEnv } from "@/server/config/env";
 import { log } from "@/server/logging/logger";
-import { assertJsonContentType, assertSameOrigin } from "@/server/security/csrf";
+import { assertJsonContentType, assertMultipart, assertSameOrigin } from "@/server/security/csrf";
 import { AppError, badRequest } from "./errors";
 
 type Handler = (req: Request, ctx: { params: Promise<Record<string, string>> }) => Promise<Response>;
@@ -18,13 +18,14 @@ const BASE_HEADERS = { "Cache-Control": "no-store", "X-Content-Type-Options": "n
  *    generic 500 whose details are logged (redacted) but never returned;
  *  - responses are never cached.
  */
-export function apiHandler(handler: Handler, options: { csrf?: boolean } = {}): Handler {
+export function apiHandler(handler: Handler, options: { csrf?: boolean; multipart?: boolean } = {}): Handler {
   const csrf = options.csrf ?? true;
   return async (req, ctx) => {
     try {
       if (csrf) {
         assertSameOrigin(req, getEnv().APP_URL);
-        assertJsonContentType(req);
+        if (options.multipart) assertMultipart(req);
+        else assertJsonContentType(req);
       }
       const res = await handler(req, ctx);
       for (const [k, v] of Object.entries(BASE_HEADERS)) if (!res.headers.has(k)) res.headers.set(k, v);

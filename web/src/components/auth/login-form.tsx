@@ -63,7 +63,7 @@ export function LoginForm() {
           </Field>
         )}
         <Button type="submit" size="lg" className="w-full" disabled={pending} aria-disabled={pending}>
-          {pending ? <Spinner label="Logging in" className="text-bg" /> : "Log in"}
+          {pending ? <Spinner label="Logging in" className="text-on-accent" /> : "Log in"}
         </Button>
         <p className="text-sm">
           <Link href="/forgot-password" className="text-fg-muted underline underline-offset-4 hover:text-fg">

@@ -2,36 +2,43 @@
 
 Source of truth: [`web/src/app/globals.css`](../../web/src/app/globals.css) (tokens) and `web/src/components/` (components). A live reference page renders every component: `/design-system` (hidden unless `ENABLE_STYLEGUIDE=true`, never indexed).
 
-Direction: pure black base, white and silver type, monochrome accents, grid and network motifs taken from the logo. No neon, no decorative gradients, no glow effects, no glassmorphism.
+Direction: near-black base, silver type, one premium orange accent reserved for primary actions, the active navigation item, focus, selection and the open/active status; grid and orbital motifs taken from the logo. No neon, no heavy gradients or glow (one faint orange glow behind the hero logo), no glassmorphism. The logo file is never modified.
 
 ## Color tokens
 
 | Token | Value | Use |
 |---|---|---|
-| `bg` | `#000000` | Page background (brand black) |
-| `surface` | `#0a0a0a` | Alternate section background, cards |
-| `surface-raised` | `#121212` | Cards on `surface`, inputs, menus |
-| `border` | `#262626` | Hairlines, dividers |
-| `border-strong` | `#404040` | Outlined buttons, badges |
-| `field-border` | `#737373` | Form control boundary |
-| `fg` | `#fafafa` | Primary text |
+| `bg` | `#090909` | Page background |
+| `surface` | `#141414` | Alternate section background, cards, footer |
+| `surface-raised` | `#1c1c1c` | Cards on `surface`, inputs, menus |
+| `border` | `#303030` | Hairlines, dividers |
+| `border-strong` | `#474747` | Outlined buttons, badges |
+| `field-border` | `#7a7a7a` | Form control boundary |
+| `fg` | `#f5f5f5` | Primary text |
 | `fg-muted` | `#a3a3a3` | Secondary text |
-| `fg-subtle` | `#8c8c8c` | Captions, labels (still AA) |
+| `fg-subtle` | `#8f8f8f` | Captions, labels (still AA) |
 | `silver` | `#d4d4d4` | Designations, emphasis within muted text |
-| `accent` | `#ffffff` | The one emphasized action, focus ring |
-| `danger` | `#ff9a9a` | Form errors only, always with icon and text |
+| `accent` | `#f07832` | Primary actions, active navigation, focus ring, selection, chart bars |
+| `accent-soft` | `#ff9a55` | Hover on orange, small orange text accents |
+| `accent-deep` | `#d95f1b` | Pressed state |
+| `on-accent` | `#090909` | Text on orange fills |
+| `accent-wash` | `#29170f` | Opaque dark-orange tint: category badges, date panels, notices, active tabs |
+| `success` | `#7ddc9c` | Semantic: confirmed registrations |
+| `warning` | `#f2cf63` | Semantic: waiting list, full |
+| `danger` | `#ff9a9a` | Errors and cancelled, always with icon and text |
 
 ### Verified contrast (WCAG 2.2 AA: 4.5:1 text, 3:1 UI boundaries)
 
 | Pair | Ratio |
 |---|---|
-| `fg` on `bg` | 20.12 |
-| `fg-muted` on `bg` / `surface-raised` | 8.33 / 7.43 |
-| `fg-subtle` on `bg` / `surface-raised` | 6.25 / 5.57 |
-| `silver` on `bg` | 14.17 |
-| `bg` on `accent` (primary button) | 21.00 |
-| `danger` on `surface-raised` | 9.22 |
-| `field-border` on `bg` / `surface-raised` | 4.43 / 3.95 |
+| `fg` on `bg` / `surface-raised` | 18.26 / 15.63 |
+| `fg-muted` on `bg` / `surface-raised` | 7.89 / 6.76 |
+| `fg-subtle` on `bg` / `surface-raised` | 6.16 / 5.27 |
+| `accent` on `bg` (orange text, focus ring) | 7.05 / 6.52 |
+| `on-accent` on `accent` / hover `accent-soft` | 7.05 / 9.49 |
+| `on-accent` on `accent-deep` (pressed) | 5.31 |
+| `danger` on `surface-raised` | 8.39 |
+| `field-border` on `bg` / `surface-raised` | 4.64 / 3.97 |
 
 `tests/design-tokens.test.ts` parses `globals.css` and fails the build if any required pair drops below its threshold, so editing a token cannot silently break contrast. Axe also checks rendered contrast at four breakpoints.
 
@@ -54,7 +61,7 @@ Rules: one H1 per page; heading levels never skip; use `text-balance` on heading
 
 - Spacing: Tailwind 4px scale. Section rhythm tokens: `py-section` (5rem), `py-section-lg` (8rem). Page gutters 16px phone, 24px tablet, 32px desktop; max width 80rem (`Container`).
 - Radius: `sm` 4px, `md` 8px (buttons, inputs), `lg` 12px (cards), `xl` 16px.
-- Shadow: depth on black comes from hairlines. `shadow-card` (1px white at 7%), `shadow-card-hover` (22% edge plus soft drop), `shadow-overlay` (menus and dialogs).
+- Shadow: depth on black comes from hairlines. `shadow-card` (1px white at 6%), `shadow-card-hover` (orange hairline plus soft drop), `shadow-overlay` (menus and dialogs).
 
 ## Breakpoints
 
@@ -70,7 +77,7 @@ Tailwind defaults: `sm` 640, `md` 768 (header switches to the dialog menu below 
 
 ## Accessibility conventions
 
-- Focus: a single 2px white outline with 3px offset on every focusable element (`:focus-visible`).
+- Focus: a single 2px orange outline with 3px offset on every focusable element (`:focus-visible`).
 - Skip link is the first tab stop; `<main id="main" tabindex="-1">` receives focus.
 - Landmarks: `header` (banner), `nav` labelled Primary / Mobile / footer columns, `main`, `footer`.
 - Status is never color alone: each status has text plus a distinct shape.
@@ -101,3 +108,48 @@ Tailwind defaults: `sm` 640, `md` 768 (header switches to the dialog menu below 
 - Status derives from one function, `deriveEventStatus`, unit-tested at every boundary.
 - Sample content is always labeled (`SampleNotice`, `SampleBadge`, `PlaceholderBadge`); an e2e test enforces it.
 - No emojis in announcements or UI copy.
+
+## Motion and interaction (UI refresh)
+
+Buttons lift no shadow but press down 1px with a deeper orange; cards gain an orange hairline on hover; table rows tint on hover; `main` fades in over 250 ms (opacity only, so contrast and layout are unaffected). Everything is disabled under `prefers-reduced-motion`. Area and administration navigation are underline tabs that scroll horizontally on narrow screens.
+
+## Orange-first surface system (second UI pass)
+
+Black stays dominant; orange is identity and feedback. Defined once in `globals.css`:
+
+- **Ambient light:** `main#main::before` draws a burnt-orange radial glow, a faint matrix grid and a sparse circuit of orange data points behind the top of every page. The glow position changes by area (`:has()` on the area navigation): account left, organizer centre, judge right, administration right with a faint left counter-light. Sections add `ambient-left/right/center/bottom`.
+- **Cards:** every card uses `.shadow-card`: charcoal, a faint orange tint from the top-left and an orange top hairline. A card holding a `<dt>`/`<dd>` pair is a key-figure card (stronger tint, orange edge, orange figure, staggered entrance). A list item or article with a link is interactive (orange edge glow, 2 px lift on hover). Event cards add generated network art with orange nodes, orange connection lines, one slowly pulsing node and one slow light pulse along an edge, plus a dark-orange date panel.
+- **Navigation:** account areas use a segmented control with an orange-tinted active pill; administration uses a sticky sidebar on large screens (scrolling pill row below `lg`); the main navigation has an animated orange underline.
+- **Controls:** orange focus border and halo on inputs, orange checkbox/radio/range, orange file-picker button and date icon, orange table header rule and row hover, orange progress and chart bars (gradient deep to soft orange, growing in once).
+- **Semantic colours stay semantic:** `Badge` tones (`accent`, `success`, `warning`, `danger`, `neutral`); status badges for full (warning) and cancelled (danger).
+- **Motion:** node pulse (4.5 s), edge flow (9 s), card hover, popover/menu/dialog pop-in (160 ms), page fade, KPI entrance. All collapse to their final state under `prefers-reduced-motion`.
+
+## Orange glass (third UI pass)
+
+Defined in `globals.css`; backdrop blur is used only where content scrolls underneath (navbar, About menu, mobile menu, the sticky administration sidebar), never on lists of cards. Every blurred class has a near-solid fallback under `@supports not (backdrop-filter)`.
+
+| Class | Use | Intensity |
+|---|---|---|
+| `.glass-nav` | Sticky navbar: dark orange-tinted glass, orange hairline and a soft orange glow on the lower edge | strongest |
+| `.glass` | Dropdown and mobile menus, administration sidebar | strong, blurred |
+| `.panel-orange` | Event date panel, leadership information section, public team cards; brightens when the parent `.group` is hovered or focused | strong, no blur |
+| `.glass-soft` and `form[role="search"]` | Account-area tabs, every search and filter form | light, no blur |
+| `.brand-logo`, `.brand-logo-hero` | Warm orange tint and soft glow on the unchanged logo file, by CSS filter only. The wordmark "ShadowTrix" is plain white, bold, 20 px (no gradient, no glow) | n/a |
+
+## Hero typewriter headline (fourth UI pass)
+
+`src/components/home/typewriter-word.tsx` animates the orange word of the hero headline (`Enter the Matrix` / `of <word>`): it types the word letter by letter with an orange caret, holds about 1.7 s, deletes it letter by letter (faster than typing), pauses 0.35 s and types the next one, through Innovation, Creativity, Technology, Possibilities, The Future, forever.
+
+- **No layout shift:** an invisible copy of the longest word reserves the width; the heading height and the buttons never move (a test samples them every 60 ms at 1440, 820, 390 and 320 px).
+- **Accessibility:** the heading's name is one constant, visually hidden sentence ("Enter the Matrix of Innovation."); the two visual lines are `aria-hidden`, so screen readers never hear the changing letters. The text exists once for crawlers; the server render shows the first word complete, so it works without JavaScript.
+- **Reduced motion:** no typing and no caret; "Innovation" stays (and follows the setting if it changes while the page is open).
+- **Styling:** `.hero-word` (orange gradient text with a solid colour fallback and a soft glow), `.hero-caret` and `.hero-caret-blink` in `globals.css`.
+- The word list is `HERO_WORDS` in `hero.tsx`.
+
+## Logo tint
+
+`.brand-logo` and `.brand-logo-hero` now use `brightness() sepia() saturate() hue-rotate()` so the near-white logo reads as soft orange. A plain sepia tint only produced cream. The artwork files are unchanged; removing the class restores the original.
+
+## Category cards
+
+Event-format cards on the home page use `.panel-orange` (dark orange gradient, orange border, orange title, accent line, arrow, hover lift and brightened edge). The event-detail "Date / Format / Places" panel uses the same recipe. The team registration notice is green (confirmed) or amber (waiting list) to keep status semantics.

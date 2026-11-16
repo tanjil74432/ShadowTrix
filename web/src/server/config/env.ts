@@ -25,6 +25,9 @@ const schema = z
     // Bearer secret for the scheduler endpoint POST /api/v1/internal/cleanup. Unset = endpoint disabled.
     CRON_SECRET: z.string().min(32).optional(),
 
+    // How long a signed direct upload may stay unfinished before the cleanup job deletes its object. Must exceed the 15-minute URL validity.
+    PENDING_UPLOAD_TTL_MINUTES: z.coerce.number().int().min(20).max(10_080).default(120),
+
     SMTP_HOST: z.string().default("localhost"),
     SMTP_PORT: z.coerce.number().int().positive().default(1025),
     SMTP_SECURE: bool,
@@ -42,7 +45,7 @@ const schema = z
   })
   .superRefine((env, ctx) => {
     if (env.STORAGE_DRIVER === "s3") {
-      for (const key of ["S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"] as const) {
+      for (const key of ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"] as const) {
         if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: `${key} is required when STORAGE_DRIVER=s3` });
       }
     }

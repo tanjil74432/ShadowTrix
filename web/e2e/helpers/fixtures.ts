@@ -7,6 +7,12 @@ import { PrismaClient } from "../../src/generated/prisma/client";
 export const PASSWORD = "correct horse battery staple";
 export const NEW_PASSWORD = "a completely different passphrase";
 export const MAILPIT = process.env.MAILPIT_URL ?? "http://localhost:8025";
+/** Private upload directory of the e2e server (see playwright.config.ts); removed after every run. */
+async function removeEventDependants(db: { certificate: { deleteMany: (args: { where: { eventId: { in: string[] } } }) => Promise<unknown> } }, eventIds: string[]) {
+  await db.certificate.deleteMany({ where: { eventId: { in: eventIds } } });
+}
+
+export const E2E_STORAGE_DIR = ".e2e-storage";
 export const COOKIE = "st_session"; // plain-http e2e server (no __Host- prefix)
 
 let prisma: PrismaClient | undefined;
@@ -66,7 +72,7 @@ export async function createRawSession(userId: string, opts: { expiresAt?: Date;
 export interface Mail {
   subject: string;
   text: string;
-  link: (path: "verify-email" | "reset-password") => string;
+  link: (path: "verify-email" | "reset-password" | "team-invitations") => string;
 }
 
 /** Polls Mailpit until an email for `to` whose subject matches arrives. These are the real emails the app sent over SMTP. */
@@ -133,6 +139,7 @@ export const test = base.extend<{ users: { create: typeof createUser; track: (em
     // Remove audit rows first: once the user is gone their actor reference is nulled and they could no longer be found.
     const ids = (await db().user.findMany({ where, select: { id: true } })).map((u) => u.id);
     const eventIds = (await db().event.findMany({ where: { createdById: { in: ids } }, select: { id: true } })).map((e) => e.id);
+    await removeEventDependants(db(), eventIds);
     await db().auditLog.deleteMany({ where: { OR: [{ actorId: { in: ids } }, { entityId: { in: [...ids, ...eventIds] } }] } });
     await db().event.deleteMany({ where: { id: { in: eventIds } } });
     await db().user.deleteMany({ where });

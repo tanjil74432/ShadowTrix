@@ -39,7 +39,7 @@ export function LeadershipPreview() {
               <li key={team.slug}>
                 <Link
                   href={`/about/team#${team.slug}`}
-                  className="inline-flex h-10 items-center rounded-full border border-border-strong px-4 text-sm text-fg-muted transition-colors duration-(--duration-fast) hover:border-fg-muted hover:text-fg"
+                  className="inline-flex h-10 items-center rounded-full border border-border-strong px-4 text-sm text-fg-muted transition-colors duration-(--duration-fast) hover:border-accent/70 hover:bg-accent-wash hover:text-accent-soft"
                 >
                   {team.name}
                 </Link>

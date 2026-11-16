@@ -5,7 +5,7 @@ import { AlertIcon } from "./icons";
 
 const control =
   "w-full rounded-md border border-field-border bg-surface-raised px-3.5 text-base text-fg placeholder:text-fg-subtle " +
-  "transition-colors duration-(--duration-fast) hover:border-fg-muted focus-visible:border-fg " +
+  "transition-colors duration-(--duration-fast) hover:border-fg-muted focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_rgb(240_120_50/0.2)] " +
   "disabled:cursor-not-allowed disabled:opacity-50 aria-[invalid=true]:border-danger";
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {

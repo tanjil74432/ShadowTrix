@@ -454,7 +454,7 @@ test.describe("role-based access to pages", () => {
   test("the admin page lists users with roles but never password data", async ({ page, users }) => {
     const admin = await users.create({ roles: ["ADMIN"], fullName: "Admin Person" });
     const other = await users.create({ roles: ["JUDGE"], fullName: "Judge Person" });
-    await uiLogin(page, admin, "/admin");
+    await uiLogin(page, admin, `/admin/users?q=${encodeURIComponent(other.email)}`);
     await expect(page.getByRole("table")).toBeVisible();
     await expect(page.getByRole("row", { name: new RegExp(other.email) })).toContainText("Judge");
     const html = await page.content();

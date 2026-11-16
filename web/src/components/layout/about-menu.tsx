@@ -28,14 +28,14 @@ export function AboutMenu() {
         <Menu.Content
           align="start"
           sideOffset={8}
-          className="z-50 w-72 rounded-lg bg-surface-raised p-1.5 shadow-overlay"
+          className="glass z-50 w-72 rounded-xl p-1.5"
         >
           {nav.about.items.map((item) => (
             <Menu.Item key={item.href} asChild>
               <Link
                 href={item.href}
                 aria-current={pathname === item.href ? "page" : undefined}
-                className="block rounded-md px-3 py-2.5 outline-none data-[highlighted]:bg-border"
+                className="block rounded-lg px-3 py-2.5 outline-none transition-colors duration-(--duration-fast) data-[highlighted]:bg-accent-wash data-[highlighted]:text-accent-soft aria-[current=page]:bg-accent-wash/70"
               >
                 <span className="block text-sm font-medium">{item.label}</span>
                 <span className="mt-0.5 block text-sm text-fg-muted">{item.description}</span>

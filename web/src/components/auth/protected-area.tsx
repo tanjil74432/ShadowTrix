@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Container } from "@/components/ui/container";
 import { requirePageAccess } from "@/server/modules/auth/dal";
-import type { Permission } from "@/server/modules/authz/permissions";
+import { hasAnyRole, type Permission, type Role } from "@/server/modules/authz/permissions";
 
 export function AccessDenied({ area }: { area: string }) {
   return (
@@ -29,16 +29,25 @@ export function AccessDenied({ area }: { area: string }) {
  */
 export async function ProtectedArea({
   permission,
+  anyRole,
   returnTo,
   area,
   children,
 }: {
-  permission: Permission;
+  /** Platform-wide permission check (global grants only). */
+  permission?: Permission;
+  /** Alternative: the user holds this role in any scope (event-scoped judges and organizers). Resources are still checked one by one. */
+  anyRole?: Role;
   returnTo: string;
   area: string;
   children: ReactNode;
 }) {
-  const { allowed } = await requirePageAccess(permission, returnTo);
+  if (anyRole) {
+    const { requireUser } = await import("@/server/modules/auth/dal");
+    const user = await requireUser(returnTo);
+    return hasAnyRole(user, anyRole) ? <>{children}</> : <AccessDenied area={area} />;
+  }
+  const { allowed } = await requirePageAccess(permission as Permission, returnTo);
   if (!allowed) return <AccessDenied area={area} />;
   return <>{children}</>;
 }

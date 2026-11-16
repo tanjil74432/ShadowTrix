@@ -6,6 +6,11 @@ import type { Mail } from "@/server/modules/email/mailer";
 import type { Actor } from "@/server/modules/authz/permissions";
 import { purgeExpiredRateLimits } from "@/server/security/rate-limit";
 
+/** Certificates keep their event and user (ON DELETE RESTRICT), so test cleanup removes them before the events. */
+async function removeEventDependants(db: { certificate: { deleteMany: (args: { where: { eventId: { in: string[] } } }) => Promise<unknown> } }, eventIds: string[]) {
+  await db.certificate.deleteMany({ where: { eventId: { in: eventIds } } });
+}
+
 export const PW = "correct horse battery staple";
 export const NEW_PW = "a completely different passphrase";
 export const ctx = { ip: null, userAgent: "vitest" } as const;
@@ -85,6 +90,7 @@ export async function cleanup() {
   // (also any leftover from an interrupted run: test events carry the reserved vt- slug prefix)
   const eventIds = (await db.event.findMany({ where: { OR: [{ createdById: { in: ids } }, { slug: { startsWith: "vt-" } }] }, select: { id: true } })).map((e) => e.id);
   if (eventIds.length) {
+    await removeEventDependants(db, eventIds);
     await db.auditLog.deleteMany({ where: { entityId: { in: eventIds } } });
     await db.event.deleteMany({ where: { id: { in: eventIds } } });
   }

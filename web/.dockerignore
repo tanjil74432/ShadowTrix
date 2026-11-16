@@ -1,0 +1,10 @@
+node_modules
+.next
+.env
+.env.*
+!.env.example
+.storage
+.e2e-storage
+test-results
+playwright-report
+tsconfig.tsbuildinfo

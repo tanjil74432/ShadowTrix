@@ -6,7 +6,7 @@ import { formatDateRange } from "@/lib/format";
 interface Props {
   registration: {
     status: "PENDING" | "CONFIRMED" | "WAITLISTED" | "CANCELLED";
-    event: { slug: string; title: string; category: string; status: string; startsAt: Date; endsAt: Date; timezone: string };
+    event: { slug: string; title: string; category: string; status: string; startsAt: Date; endsAt: Date; timezone: string; resultsPublishedAt?: Date | null; submissionDeadline?: Date | null };
   };
   now: Date;
 }
@@ -26,9 +26,19 @@ export function RegistrationRow({ registration: r, now }: Props) {
           {EVENT_CATEGORIES[e.category as EventCategoryKey]?.label ?? e.category} · <time dateTime={e.startsAt.toISOString()}>{formatDateRange(e.startsAt, e.endsAt, e.timezone)}</time>
         </p>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <Badge className="text-fg">{LABEL[r.status]}</Badge>
-        <Badge>{phase}</Badge>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={r.status === "CONFIRMED" ? "success" : r.status === "WAITLISTED" ? "warning" : r.status === "CANCELLED" ? "danger" : "neutral"}>{LABEL[r.status]}</Badge>
+        <Badge tone={phase === "Live now" ? "accent" : "neutral"}>{phase}</Badge>
+        {r.status === "CONFIRMED" && e.status === "PUBLISHED" && (
+          <Link href={`/events/${e.slug}/submission`} className="text-sm font-medium underline underline-offset-4">
+            Project
+          </Link>
+        )}
+        {e.resultsPublishedAt && (
+          <Link href={`/events/${e.slug}/results`} className="text-sm font-medium underline underline-offset-4">
+            Results
+          </Link>
+        )}
       </div>
     </li>
   );

@@ -1,6 +1,6 @@
 import { apiHandler, readJson } from "@/server/http/handler";
 import { requireApiUser } from "@/server/modules/auth/dal";
-import { profileSchema } from "@/server/modules/events/event.schema";
+import { profileSchema } from "@/server/modules/auth/profile.schema";
 import { updateOwnProfile } from "@/server/modules/auth/profile.service";
 
 /** Update the signed-in user's own name and bio. The id always comes from the session, never from the request. */

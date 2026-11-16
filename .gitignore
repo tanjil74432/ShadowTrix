@@ -14,3 +14,7 @@ Thumbs.db
 uploads/
 .storage/
 *.tsbuildinfo
+.e2e-storage/
+
+.vercel
+.env*

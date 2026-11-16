@@ -21,6 +21,12 @@ Owner decisions that shape this list (recorded 2026-11-15): the first administra
 |---|---|---|
 | A1 | **Optional MFA for administrators** (TOTP and recovery codes). | **Done and tested** (RFC 6238 vectors, replay and concurrency, recovery codes, e2e UI flow), still optional and never blocking. Open within A1: a shorter admin session policy, step-up re-authentication for sensitive admin actions, QR code, WebAuthn. |
 | A2 | Correct the footer "Account" column when signed in (it still shows Login and Register; those links redirect to the dashboard). | Open |
+| A15 | Independent accessibility review with screen readers and real devices (extends A3 to A5). | Open |
+| A16 | Nonce or hash based CSP, dependency/secret scanning in CI, WAF or DDoS protection once hosted (see operations/security-review.md). | Open |
+| A11 | **S3-compatible storage driver** for uploads (the interface exists; only the local driver is implemented). Needed before a host without a persistent disk. | Open |
+| A12 | **Upload scanning:** uploaded files are validated by type and content but not scanned for malware; ZIP files are stored unopened. | Open |
+| A13 | **Certificate PDFs for non-Latin names:** standard fonts print unsupported characters as `?`. Embed a Unicode font. | Open |
+| A14 | Emails for team-registration promotion, judging opening and result publication. | Open |
 | A9 | Event times are entered and shown in UTC only (the event time zone is stored but the form does not offer it). | Open |
 | A10 | The public event page answers `200` with a not-found view for unknown or hidden events (the page streams), marked `noindex`. A real `404` status would need the lookup before the first byte. | Open |
 | A3 | Test in Firefox and Safari (only Edge locally and Chromium in CI so far). | Open |

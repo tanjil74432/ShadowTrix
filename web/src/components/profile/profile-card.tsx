@@ -31,8 +31,8 @@ export function ProfileCard({ profile, headingLevel: Heading = "h3", className }
   return (
     <article
       className={cn(
-        "group relative overflow-hidden rounded-lg bg-surface shadow-card transition-shadow duration-(--duration-base) ease-out-soft",
-        href && "hover:shadow-card-hover focus-within:shadow-card-hover",
+        "group relative overflow-hidden rounded-lg bg-surface shadow-card transition-[box-shadow,transform] duration-(--duration-base) ease-out-soft",
+        href && "hover:-translate-y-1 hover:shadow-card-hover focus-within:shadow-card-hover motion-reduce:hover:translate-y-0",
         className,
       )}
     >
@@ -46,14 +46,15 @@ export function ProfileCard({ profile, headingLevel: Heading = "h3", className }
             className="object-cover"
           />
         ) : (
-          <div aria-hidden className="grid h-full place-items-center bg-grid text-6xl text-border-strong">
-            <UserIcon strokeWidth={1} className="size-1/3" />
+          <div aria-hidden className="relative grid h-full place-items-center overflow-hidden bg-[radial-gradient(ellipse_70%_60%_at_50%_35%,rgb(217_95_27/0.28),transparent_75%)] text-6xl text-accent/60">
+            <div className="bg-grid absolute inset-0 opacity-70" />
+            <UserIcon strokeWidth={1} className="relative size-1/3" />
           </div>
         )}
         {isPlaceholder && <PlaceholderBadge className="absolute top-3 left-3" />}
       </div>
-      <div className="space-y-1 p-4">
-        <Heading className="font-semibold text-balance">
+      <div className="panel-orange space-y-1.5 rounded-none border-x-0 border-b-0 p-4">
+        <Heading className="font-semibold text-balance text-fg">
           {href ? (
             <Link href={href} className="after:absolute after:inset-0 after:content-['']">
               {name}
@@ -62,8 +63,9 @@ export function ProfileCard({ profile, headingLevel: Heading = "h3", className }
             name
           )}
         </Heading>
-        <p className="text-sm text-silver">{designation}</p>
-        {term && <p className="text-sm text-fg-subtle">Term: {term}</p>}
+        <span aria-hidden className="block h-0.5 w-8 rounded-full bg-gradient-to-r from-accent to-accent-soft" />
+        <p className="text-sm font-semibold text-accent-soft">{designation}</p>
+        {term && <p className="text-sm text-fg-muted">Term: {term}</p>}
       </div>
     </article>
   );

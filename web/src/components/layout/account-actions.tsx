@@ -17,7 +17,7 @@ export async function AccountActions() {
         <NavLink href={nav.account.login.href} className="hidden md:inline-block">
           {nav.account.login.label}
         </NavLink>
-        <Button asChild size="sm" className="hidden md:inline-flex">
+        <Button asChild size="sm" className="hidden shadow-glow-soft md:inline-flex">
           <Link href={nav.account.register.href}>{nav.account.register.label}</Link>
         </Button>
       </>

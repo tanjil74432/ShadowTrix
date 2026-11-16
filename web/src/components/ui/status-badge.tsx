@@ -53,11 +53,20 @@ function Glyph({ status }: { status: RegistrationStatus }) {
 
 export function StatusBadge({ status, className }: { status: RegistrationStatus; className?: string }) {
   const emphasized = status === "OPEN" || status === "LIVE";
+  const upcoming = status === "OPENS_SOON";
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
-        emphasized ? "bg-accent text-bg" : "border border-border-strong bg-bg/70 text-fg",
+        emphasized
+          ? "bg-accent text-on-accent shadow-glow-soft"
+          : upcoming
+            ? "border border-accent/50 bg-accent-wash text-accent-soft"
+            : status === "FULL"
+              ? "border border-warning/40 bg-[#2a2410] text-warning"
+              : status === "CANCELLED"
+                ? "border border-danger/45 bg-[#2a1212] text-danger"
+                : "border border-border-strong bg-bg/85 text-fg",
         className,
       )}
     >

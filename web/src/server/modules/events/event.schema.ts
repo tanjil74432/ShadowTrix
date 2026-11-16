@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { stripNul } from "@/lib/sanitize";
+
 export const EVENT_CATEGORY_VALUES = ["HACKATHON", "DATATHON", "AI_ML", "PROGRAMMING_CONTEST", "WORKSHOP", "SUMMIT", "INNOVATION_CHALLENGE", "OTHER"] as const;
 export const LOCATION_TYPES = ["ONLINE", "ONSITE", "HYBRID"] as const;
 
@@ -34,9 +36,25 @@ const base = {
     .union([z.coerce.number().int("Capacity must be a whole number.").min(1, "Capacity must be at least 1.").max(100_000, "Capacity is too large."), z.literal("").transform(() => null), z.null()])
     .optional(),
   locationType: z.enum(LOCATION_TYPES).default("ONLINE"),
+  registrationMode: z.enum(["INDIVIDUAL", "TEAM"], { message: "Choose individual or team registration." }).optional(),
+  minTeamSize: z.union([z.coerce.number().int("Use a whole number.").min(1, "At least 1.").max(50, "At most 50."), z.literal("").transform(() => null), z.null()]).optional(),
+  maxTeamSize: z.union([z.coerce.number().int("Use a whole number.").min(1, "At least 1.").max(50, "At most 50."), z.literal("").transform(() => null), z.null()]).optional(),
   location: z.union([text(1, 200, "The location"), z.literal("").transform(() => null), z.null()]).optional(),
   eligibility: z.union([text(1, 1000, "Eligibility"), z.literal("").transform(() => null), z.null()]).optional(),
 };
+
+type TeamFields = { registrationMode?: "INDIVIDUAL" | "TEAM"; minTeamSize?: number | null; maxTeamSize?: number | null };
+
+/** Mirrors events_team_size_chk. Team events need both limits, with max at least min. */
+export function teamIssues(d: TeamFields): { path: string; message: string }[] {
+  const issues: { path: string; message: string }[] = [];
+  if (d.registrationMode === "TEAM") {
+    if (d.minTeamSize == null) issues.push({ path: "minTeamSize", message: "Team events need a minimum team size." });
+    if (d.maxTeamSize == null) issues.push({ path: "maxTeamSize", message: "Team events need a maximum team size." });
+    if (d.minTeamSize != null && d.maxTeamSize != null && d.maxTeamSize < d.minTeamSize) issues.push({ path: "maxTeamSize", message: "The maximum cannot be smaller than the minimum." });
+  }
+  return issues;
+}
 
 type Dates = {
   startsAt?: Date; endsAt?: Date; registrationOpensAt?: Date; registrationClosesAt?: Date;
@@ -56,27 +74,22 @@ export function timelineIssues(d: Dates): { path: string; message: string }[] {
   return issues;
 }
 
-const withTimeline = <T extends z.ZodType<Dates>>(schema: T) =>
+const withTimeline = <T extends z.ZodType<Dates & TeamFields>>(schema: T) =>
   schema.superRefine((v, ctx) => {
-    for (const i of timelineIssues(v)) ctx.addIssue({ code: "custom", path: [i.path], message: i.message });
+    for (const i of [...timelineIssues(v), ...teamIssues(v)]) ctx.addIssue({ code: "custom", path: [i.path], message: i.message });
   });
 
-/** Registration mode is INDIVIDUAL for now; team registration arrives with the teams milestone. Unknown keys (slug, status, createdById, ...) are dropped. */
+/** Unknown keys (slug, status, createdById, ...) are dropped. Team events (registrationMode TEAM) need min and max team size. */
 export const createEventSchema = withTimeline(z.object(base));
 export const updateEventSchema = withTimeline(z.object(base).partial());
 
 export const eventStatusActionSchema = z.object({ action: z.enum(["publish", "unpublish", "cancel", "archive"]) });
 
 export const listEventsQuerySchema = z.object({
-  q: z.string().trim().max(100).optional(),
+  q: z.string().transform(stripNul).pipe(z.string().trim().max(100)).optional(),
   category: z.enum(EVENT_CATEGORY_VALUES).optional(),
   page: z.coerce.number().int().min(1).max(10_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(50).default(12),
-});
-
-export const profileSchema = z.object({
-  fullName: text(2, 100, "Your name"),
-  bio: z.union([text(1, 500, "Your bio"), z.literal("").transform(() => null), z.null()]).optional(),
 });
 
 export type CreateEventInput = z.infer<typeof createEventSchema>;

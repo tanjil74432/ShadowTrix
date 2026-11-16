@@ -12,7 +12,7 @@ const roles = [
 
 export function Community() {
   return (
-    <section aria-labelledby="community-title" className="border-y border-border bg-surface py-section">
+    <section aria-labelledby="community-title" className="ambient-center border-y border-border bg-surface py-section">
       <Container>
         <SectionHeading
           id="community-title"
