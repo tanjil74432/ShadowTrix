@@ -2,7 +2,7 @@
 
 Intended first administrator: the owner's account, **tanjilshaiket74432@gmail.com**.
 
-**Status (2026-11-17): not granted.** In the PRODUCTION database (Neon) the account has not been registered, no administrator role exists, `npm run admin:grant` has never been run against it and no default credentials exist. The role is granted only after the owner's explicit confirmation at the moment of execution (step 5).
+**Status (2026-11-17): granted.** The owner's account was registered, and its email was confirmed on 2026-11-17 (13:46 UTC, after the Gmail App Password was corrected). Before the grant it held only the `PARTICIPANT` role and the production database contained no `ADMIN` assignment at all, so `/admin` answered "You do not have access to administration": that is the correct response for an account without the role, not a defect in the permission checks. The role was then granted at 17:17 UTC with `npm run admin:grant` (Neon direct connection supplied for that one command only), which wrote one `admin.bootstrap_grant` audit entry. Afterwards production holds exactly one `ADMIN` assignment (this account); the other two accounts are still `PARTICIPANT` only. No default credentials exist.
 
 ## Rules
 
