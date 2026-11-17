@@ -95,3 +95,5 @@ Code: promote the previous successful production deployment in the Vercel dashbo
 ## 10. Expected free-tier limitations
 
 Cold start after 5 idle minutes on Neon (a slow first page), a daily-only scheduler with up to an hour of drift, about 500 emails a day, 10 GB of files, Vercel's 4.5 MB function body limit (files bypass it), and the non-commercial restriction.
+
+**Incident 2026-11-17: verification email not delivered.** Production recorded `email.delivery_failed` with `EAUTH`, SMTP reply 535, command `AUTH PLAIN` (Gmail rejected the login; host, port and STARTTLS were correct). The send runs after the HTTP response (`after()`), so the caller still sees the same neutral 202 by design; the failure is visible only in the audit log (`email.delivery_failed`) and the function log. Fix shipped: credentials are cleaned when the environment is read (wrapping quotes, whitespace, trailing newline, and for Gmail the spaces of the app password), and a login rejection now also stores booleans and the password length (never a value) so the cause can be told apart. A changed `SMTP_PASSWORD` only takes effect on a new deployment.
