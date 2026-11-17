@@ -31,7 +31,7 @@ async function addPhoto(page: Page) {
   for (let attempt = 0; attempt < 6; attempt++) {
     await page.locator('input[type="file"]').setInputFiles({ name: "me.jpg", mimeType: "image/jpeg", buffer });
     if (await page.getByText("Drag the preview to reposition the portrait.").isVisible({ timeout: 2500 }).catch(() => false)) return;
-    await settle(page);
+    await page.waitForTimeout(500);
   }
   throw new Error("the editor never accepted the portrait");
 }
@@ -40,7 +40,8 @@ async function addPhoto(page: Page) {
 async function settle(page: Page) {
   await page.evaluate(async () => {
     const family = getComputedStyle(document.body).fontFamily;
-    await Promise.all([500, 600, 700, 800].map((w) => document.fonts.load(`${w} 24px ${family}`)));
+    // Each load is allowed to fail on its own: next/font adds a fallback face that needs a locally installed font (absent on the Linux CI runner), and a face that cannot load rejects with a NetworkError. The page and the editor fall back to the next font in the list, so only the wait matters here.
+    await Promise.all([500, 600, 700, 800].map((w) => document.fonts.load(`${w} 24px ${family}`).catch(() => [])));
     await document.fonts.ready;
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   });
@@ -313,6 +314,31 @@ test.describe("official banner creator", () => {
     } finally {
       await cleanup([mine]);
     }
+  });
+
+  test("the editor and the export still work when a font face cannot be loaded (as on a machine without the fallback font)", async ({ page, users }) => {
+    test.setTimeout(120_000);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    // Every explicit font load now rejects with a NetworkError, which is what next/font's local-font fallback does on a Linux machine without that font.
+    await page.addInitScript(() => {
+      FontFaceSet.prototype.load = () => Promise.reject(new DOMException("A network error occurred.", "NetworkError"));
+    });
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    const u = await users.create({ fullName: "Fallback Font Person" });
+    await uiLogin(page, u, "/dashboard/banner");
+    await addPhoto(page);
+    await page.getByLabel(/^Background text/).fill("MY TEAM");
+    await page.getByLabel(/^University name/).fill("Test University");
+    const canvas = page.getByTestId("banner-canvas");
+    await settle(page);
+    const preview = await canvas.evaluate((c: HTMLCanvasElement) => ({ w: c.width, h: c.height, data: c.toDataURL("image/png") }));
+    expect([preview.w, preview.h]).toEqual([1080, 1350]);
+    const [dl] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /Download PNG/ }).click()]);
+    const buf = fs.readFileSync((await dl.path())!);
+    expect(pngSize(buf)).toEqual({ w: 1080, h: 1350 });
+    await expectExportMatches(page, canvas, preview.data, buf);
+    expect(errors, "a failed font load must not surface as an unhandled error").toEqual([]);
   });
 
   for (const vp of [{ name: "mobile", width: 390, height: 844 }, { name: "desktop", width: 1440, height: 900 }]) {
