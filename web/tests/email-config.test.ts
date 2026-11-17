@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { smtpMailer } from "@/server/modules/email/mailer";
+
+vi.mock("nodemailer", () => ({ default: { createTransport: () => ({ sendMail: async () => ({ response: "250 2.0.0 OK 1700000000 abc123 - gsmtp", accepted: ["person@example.com"], rejected: [], messageId: "<id@example.com>" }) }) } }));
 import { parseEnv } from "@/server/config/env";
 import { getDb } from "@/server/db/client";
 import { registerSchema } from "@/server/modules/auth/auth.schema";
@@ -165,5 +168,17 @@ describe("SMTP credential hygiene", () => {
     const bad = describeSmtpCredentialShape({ host: "smtp.gmail.com", user: "me", password: '"abcd efgh ijkl mnop"', from: "ShadowTrix <other@gmail.com>" });
     expect(bad).toMatchObject({ userIsEmailAddress: false, userMatchesSender: false, passwordLength: 16, passwordHadStrayCharacters: true });
     expect(JSON.stringify(bad)).not.toMatch(/abcd|me@gmail|other@/);
+  });
+});
+
+describe("provider acceptance is recorded", () => {
+  it("a sent message leaves an audit row with the reply code and counts only", async () => {
+    await getDb().auditLog.deleteMany({ where: { action: "email.delivered" } });
+    await smtpMailer.send({ to: "person@example.com", subject: "s", text: "t", html: "<p>t</p>" });
+    const rows = await getDb().auditLog.findMany({ where: { action: "email.delivered" } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].after).toEqual({ responseCode: 250, accepted: 1, rejected: 0 });
+    expect(JSON.stringify(rows[0])).not.toMatch(/person@example|abc123|gsmtp|<id@/);
+    expect(rows[0].actorId).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import "server-only";
 import nodemailer, { type Transporter } from "nodemailer";
 import { getEnv } from "@/server/config/env";
+import { writeAudit } from "@/server/modules/audit/audit.service";
 
 export interface Mail {
   to: string;
@@ -25,7 +26,11 @@ export const smtpMailer: Mailer = {
       secure: env.SMTP_SECURE,
       auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASSWORD } : undefined,
     });
-    await transporter.sendMail({ from: env.EMAIL_FROM, ...mail });
+    const info = await transporter.sendMail({ from: env.EMAIL_FROM, ...mail });
+    // Proof of provider acceptance for administrators: the SMTP reply code and counts only (never an address, a message id or text).
+    // Acceptance is not inbox delivery: the provider can still filter the message.
+    const code = Number(String(info.response ?? "").slice(0, 3));
+    await writeAudit({ actorId: null, action: "email.delivered", entityType: "system", entityId: "email", after: { responseCode: Number.isInteger(code) && code >= 200 && code <= 299 ? code : null, accepted: info.accepted?.length ?? 0, rejected: info.rejected?.length ?? 0 } }).catch(() => undefined);
   },
 };
 
