@@ -78,12 +78,12 @@ export function describeMailError(err: unknown): { code: string; responseCode?: 
  */
 export interface SmtpCredentialShape {
   userSet: boolean;
-  userIsEmailAddress: boolean;
+  userLooksLikeAddress: boolean;
   userMatchesSender: boolean;
   userHadStrayCharacters: boolean;
-  passwordSet: boolean;
-  passwordLength: number;
-  passwordHadStrayCharacters: boolean;
+  appKeySet: boolean;
+  appKeyLength: number;
+  appKeyHadStrayCharacters: boolean;
   gmailHost: boolean;
 }
 
@@ -94,12 +94,12 @@ export function describeSmtpCredentialShape(raw: { host?: string; user?: string;
   const sender = (raw.from ?? "").match(/<([^>]+)>/)?.[1] ?? (raw.from ?? "");
   return {
     userSet: Boolean(user),
-    userIsEmailAddress: Boolean(user && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user)),
+    userLooksLikeAddress: Boolean(user && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user)),
     userMatchesSender: Boolean(user && user.toLowerCase() === sender.trim().toLowerCase()),
     userHadStrayCharacters: raw.user !== undefined && raw.user !== (user ?? ""),
-    passwordSet: Boolean(password),
-    passwordLength: password?.length ?? 0,
-    passwordHadStrayCharacters: raw.password !== undefined && raw.password !== (password ?? ""),
+    appKeySet: Boolean(password),
+    appKeyLength: password?.length ?? 0,
+    appKeyHadStrayCharacters: raw.password !== undefined && raw.password !== (password ?? ""),
     gmailHost: isGmailHost(host),
   };
 }

@@ -121,7 +121,8 @@ describe("a delivery failure is recorded safely", () => {
     expect(rows).toHaveLength(1);
     // a login rejection also records safe facts about the configured login (booleans and a length), never a value
     expect(rows[0].after).toMatchObject({ code: "EAUTH", responseCode: 535, command: "AUTH PLAIN" });
-    expect(Object.keys((rows[0].after as { credentials: object }).credentials).sort()).toEqual(["gmailHost", "passwordHadStrayCharacters", "passwordLength", "passwordSet", "userHadStrayCharacters", "userIsEmailAddress", "userMatchesSender", "userSet"]);
+    expect(Object.keys((rows[0].after as { credentials: object }).credentials).sort()).toEqual(["appKeyHadStrayCharacters", "appKeyLength", "appKeySet", "gmailHost", "userHadStrayCharacters", "userLooksLikeAddress", "userMatchesSender", "userSet"]);
+    expect(JSON.stringify((rows[0].after as { credentials: object }).credentials)).not.toContain("[redacted]"); // the redactor must not mask these harmless facts
     expect(JSON.stringify(rows[0])).not.toMatch(/example\.com|hunter2|Username/);
     expect(rows[0].actorId).toBeNull();
   });
@@ -164,9 +165,9 @@ describe("SMTP credential hygiene", () => {
 
   it("the shape report explains a rejection without containing any value", () => {
     const good = describeSmtpCredentialShape({ host: "smtp.gmail.com", user: "me@gmail.com", password: "abcdefghijklmnop", from: "ShadowTrix <me@gmail.com>" });
-    expect(good).toEqual({ userSet: true, userIsEmailAddress: true, userMatchesSender: true, userHadStrayCharacters: false, passwordSet: true, passwordLength: 16, passwordHadStrayCharacters: false, gmailHost: true });
+    expect(good).toEqual({ userSet: true, userLooksLikeAddress: true, userMatchesSender: true, userHadStrayCharacters: false, appKeySet: true, appKeyLength: 16, appKeyHadStrayCharacters: false, gmailHost: true });
     const bad = describeSmtpCredentialShape({ host: "smtp.gmail.com", user: "me", password: '"abcd efgh ijkl mnop"', from: "ShadowTrix <other@gmail.com>" });
-    expect(bad).toMatchObject({ userIsEmailAddress: false, userMatchesSender: false, passwordLength: 16, passwordHadStrayCharacters: true });
+    expect(bad).toMatchObject({ userLooksLikeAddress: false, userMatchesSender: false, appKeyLength: 16, appKeyHadStrayCharacters: true });
     expect(JSON.stringify(bad)).not.toMatch(/abcd|me@gmail|other@/);
   });
 });
