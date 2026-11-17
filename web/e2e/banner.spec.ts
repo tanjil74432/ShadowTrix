@@ -186,7 +186,7 @@ test.describe("official banner creator", () => {
     await cleanup([real, fake]);
   });
 
-  test("one universal layout: no role templates, a free background text that is not a designation, and every control changes the artwork", async ({ page, users }) => {
+  test("one universal layout: no role templates, a free identity text above the photo that is not a designation, and every control changes the artwork", async ({ page, users }) => {
     test.setTimeout(240_000);
     await page.emulateMedia({ reducedMotion: "reduce" });
     const SHOTS = process.env.BANNER_SHOTS ? path.resolve(__dirname, "../../docs/reports/banner-redesign") : OUT;
@@ -204,12 +204,12 @@ test.describe("official banner creator", () => {
     const canvas = page.getByTestId("banner-canvas");
     const snap = async () => { await settle(page); return canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL("image/png")); };
 
-    // the background text is decoration: typing a role word there never creates a designation
-    const bgText = page.getByLabel(/^Background text/);
+    // the identity text is decoration: typing a role word there never creates a designation
+    const bgText = page.getByLabel(/^Identity text/);
     await expect(bgText).toHaveValue("SHADOW");
     const initial = await snap();
     await bgText.fill("FOUNDER");
-    await expect(canvas).toHaveAttribute("aria-label", /background text FOUNDER/);
+    await expect(canvas).toHaveAttribute("aria-label", /identity text FOUNDER/);
     const withFounder = await snap();
     expect(withFounder).not.toBe(initial);
     await expect(page.getByLabel(/^Designation/)).toBeDisabled(); // an ordinary person still has no verified designation
@@ -218,15 +218,15 @@ test.describe("official banner creator", () => {
 
     // every background control changes the picture
     const seen = new Set([initial, withFounder]);
-    for (const [label, value] of [["Text size", "280"], ["Text position left / right", "0.6"], ["Text position up / down", "-0.7"], ["Text opacity", "0.5"], ["Text rotation", "-14"]] as const) {
+    for (const [label, value] of [["Text size", "120"], ["Text position left / right", "0.6"], ["Text position up / down", "-0.7"], ["Text opacity", "0.5"], ["Text rotation", "-9"]] as const) {
       await page.getByLabel(label, { exact: true }).fill(value);
       const now = await snap();
       expect(seen.has(now), `${label} should change the artwork`).toBe(false);
       seen.add(now);
     }
-    await page.getByRole("button", { name: "Reset background text" }).click();
+    await page.getByRole("button", { name: "Reset identity text" }).click();
     await expect(bgText).toHaveValue("SHADOW");
-    await expect(page.getByLabel("Text size", { exact: true })).toHaveValue("200");
+    await expect(page.getByLabel("Text size", { exact: true })).toHaveValue("190");
     await expect(page.getByLabel("Text rotation", { exact: true })).toHaveValue("0");
     expect(await samePicture(page, await snap(), initial)).toBe(true); // reset restores the starting artwork
 
@@ -281,7 +281,7 @@ test.describe("official banner creator", () => {
     await page.screenshot({ path: path.join(SHOTS, "editor-mobile.png"), fullPage: true });
   });
 
-  test("a verified designation stays separate from the background text, and missing information or maximum-length input still exports a clean 1080 x 1350 banner", async ({ page, users }) => {
+  test("a verified designation stays separate from the identity text, and missing information or maximum-length input still exports a clean 1080 x 1350 banner", async ({ page, users }) => {
     test.setTimeout(120_000);
     await page.emulateMedia({ reducedMotion: "reduce" });
     const u = await users.create({ fullName: "Verified Longtext" });
@@ -291,7 +291,7 @@ test.describe("official banner creator", () => {
       await expect(page.getByLabel(/^Designation/)).toBeEnabled();
       const options = await page.getByLabel(/^Designation/).locator("option").allTextContents();
       expect(options).toEqual(["None", mine.designation!.title]); // only the approved position; "FOUNDER" typed elsewhere cannot add one
-      await page.getByLabel(/^Background text/).fill("FOUNDER");
+      await page.getByLabel(/^Identity text/).fill("FOUNDER");
       expect(await page.getByLabel(/^Designation/).locator("option").allTextContents()).toEqual(options);
       await page.getByLabel(/^Name/).fill("W".repeat(60));
       await page.getByLabel(/^University name/).fill("U".repeat(80));
@@ -299,9 +299,9 @@ test.describe("official banner creator", () => {
       await page.getByLabel(/^Event name/).fill("E".repeat(80));
       await page.getByLabel(/^Team or organization name/).fill("T".repeat(60));
       await page.getByLabel(/^Tagline/).fill("G".repeat(90));
-      await page.getByLabel(/^Background text/).fill("W".repeat(24));
-      await page.getByLabel("Text size", { exact: true }).fill("320");
-      await page.getByLabel("Text rotation", { exact: true }).fill("30");
+      await page.getByLabel(/^Identity text/).fill("W".repeat(24));
+      await page.getByLabel("Text size", { exact: true }).fill("200");
+      await page.getByLabel("Text rotation", { exact: true }).fill("12");
       const canvas = page.getByTestId("banner-canvas");
       await settle(page);
       const preview = await canvas.evaluate((c: HTMLCanvasElement) => ({ w: c.width, h: c.height, data: c.toDataURL("image/png") }));
@@ -328,7 +328,7 @@ test.describe("official banner creator", () => {
     const u = await users.create({ fullName: "Fallback Font Person" });
     await uiLogin(page, u, "/dashboard/banner");
     await addPhoto(page);
-    await page.getByLabel(/^Background text/).fill("MY TEAM");
+    await page.getByLabel(/^Identity text/).fill("MY TEAM");
     await page.getByLabel(/^University name/).fill("Test University");
     const canvas = page.getByTestId("banner-canvas");
     await settle(page);
@@ -339,6 +339,50 @@ test.describe("official banner creator", () => {
     expect(pngSize(buf)).toEqual({ w: 1080, h: 1350 });
     await expectExportMatches(page, canvas, preview.data, buf);
     expect(errors, "a failed font load must not surface as an unhandled error").toEqual([]);
+  });
+
+  test("Option A: the identity text is a heading ABOVE the photo, never over it, for short and for very long text", async ({ page, users }) => {
+    test.setTimeout(150_000);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const u = await users.create({ fullName: "Heading Above Photo" });
+    await uiLogin(page, u, "/dashboard/banner");
+    await addPhoto(page);
+    const canvas = page.getByTestId("banner-canvas");
+    // A flat, very different colour as the photo, so any text drawn over it would be detected: the frame interior must be pure photo.
+    const framePixels = async () => canvas.evaluate((c: HTMLCanvasElement) => {
+      const g = c.getContext("2d")!;
+      const d = g.getImageData(214, 240, 760, 12).data; // a strip just inside the top of the portrait frame (frame y = 215, inner border 14 px)
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) n += d[i] + d[i + 1] + d[i + 2];
+      return n;
+    });
+    const headingPixels = async () => canvas.evaluate((c: HTMLCanvasElement) => {
+      const g = c.getContext("2d")!;
+      const d = g.getImageData(190, 22, 810, 168).data; // the heading band above the frame
+      let bright = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 200 && d[i + 1] > 200 && d[i + 2] > 200) bright++;
+      return bright;
+    });
+    await settle(page);
+    const stripWithDefault = await framePixels();
+    const brightDefault = await headingPixels();
+    expect(brightDefault, "the default heading is drawn in the band above the photo").toBeGreaterThan(2000);
+    const field = page.getByLabel(/^Identity text/);
+    const shots: Record<string, string> = {};
+    for (const [text, size, rotation] of [["I", "200", "0"], ["JUDGE", "200", "12"], ["CO-FOUNDER", "200", "-12"], ["SHADOWTRIX", "200", "0"], ["W".repeat(24), "200", "12"]] as const) {
+      await field.fill(text);
+      await page.getByLabel("Text size", { exact: true }).fill(size);
+      await page.getByLabel("Text rotation", { exact: true }).fill(rotation);
+      await settle(page);
+      expect(await framePixels(), `"${text}" must not be drawn over the portrait`).toBe(stripWithDefault);
+      expect(await headingPixels(), `"${text}" is drawn above the photo`).toBeGreaterThan(300);
+      shots[text] = await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL("image/png"));
+    }
+    expect(new Set(Object.values(shots)).size).toBe(5); // each text gives its own picture
+    await field.fill("");
+    await settle(page);
+    expect(await headingPixels(), "an empty identity text draws no heading").toBeLessThan(brightDefault / 4);
+    expect(await framePixels()).toBe(stripWithDefault);
   });
 
   for (const vp of [{ name: "mobile", width: 390, height: 844 }, { name: "desktop", width: 1440, height: 900 }]) {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import {
-  BANNER_H, BANNER_W, BG_TEXT_MAX, DEFAULT_BACKGROUND, FIELD_MAX, FRAME, NAME_MAX, PORTRAIT_MAX_BYTES, PORTRAIT_TYPES, TAGLINE_MAX, TEAM_MAX,
+  BANNER_H, BANNER_W, BG_TEXT_MAX, DEFAULT_BACKGROUND, FIELD_MAX, FRAME, NAME_MAX, OPACITY_RANGE, PORTRAIT_MAX_BYTES, PORTRAIT_TYPES, ROTATION_RANGE, SIZE_RANGE, TAGLINE_MAX, TEAM_MAX,
   clamp, drawBanner, type BackgroundText, type Crop,
 } from "@/lib/banner/render";
 import { site } from "@/lib/site";
@@ -222,12 +222,12 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
         </fieldset>
 
         <fieldset className="space-y-3 rounded-lg border border-border p-4">
-          <legend className="px-1 text-sm font-medium">Background text</legend>
-          <Field label="Background text" hint="Large, soft lettering behind your photo, for example FOUNDER, MY TEAM or anything you like. It is decoration only: not a verified role, and it gives no access.">
+          <legend className="px-1 text-sm font-medium">Identity text</legend>
+          <Field label="Identity text" hint="Large lettering above your photo, for example FOUNDER, MY TEAM or anything you like. It is decoration only: not a verified role, and it gives no access.">
             {(c) => <Input {...c} value={bg.text} maxLength={BG_TEXT_MAX} onChange={(e) => setBgField("text", e.target.value)} autoComplete="off" />}
           </Field>
           <label className="block text-sm">Text size
-            <input type="range" min={60} max={320} step={2} value={bg.size} onChange={(e) => setBgField("size", Number(e.target.value))} className={slider} />
+            <input type="range" min={SIZE_RANGE.min} max={SIZE_RANGE.max} step={2} value={bg.size} onChange={(e) => setBgField("size", Number(e.target.value))} className={slider} />
           </label>
           <label className="block text-sm">Text position left / right
             <input type="range" min={-1} max={1} step={0.01} value={bg.x} onChange={(e) => setBgField("x", Number(e.target.value))} className={slider} />
@@ -236,12 +236,12 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
             <input type="range" min={-1} max={1} step={0.01} value={bg.y} onChange={(e) => setBgField("y", Number(e.target.value))} className={slider} />
           </label>
           <label className="block text-sm">Text opacity
-            <input type="range" min={0.05} max={0.6} step={0.01} value={bg.opacity} onChange={(e) => setBgField("opacity", Number(e.target.value))} className={slider} />
+            <input type="range" min={OPACITY_RANGE.min} max={OPACITY_RANGE.max} step={0.01} value={bg.opacity} onChange={(e) => setBgField("opacity", Number(e.target.value))} className={slider} />
           </label>
           <label className="block text-sm">Text rotation
-            <input type="range" min={-30} max={30} step={1} value={bg.rotation} onChange={(e) => setBgField("rotation", Number(e.target.value))} className={slider} />
+            <input type="range" min={ROTATION_RANGE.min} max={ROTATION_RANGE.max} step={1} value={bg.rotation} onChange={(e) => setBgField("rotation", Number(e.target.value))} className={slider} />
           </label>
-          <Button type="button" variant="secondary" size="sm" onClick={() => setBg(DEFAULT_BACKGROUND)}>Reset background text</Button>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setBg(DEFAULT_BACKGROUND)}>Reset identity text</Button>
         </fieldset>
 
         <Field label="Name" required>
@@ -293,7 +293,7 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
           width={BANNER_W}
           height={BANNER_H}
           role="img"
-          aria-label={`Banner preview for ${name || "your name"}${shown("designation", designation) ? `, ${designation}` : ""}${bg.text.trim() ? `, background text ${bg.text.trim()}` : ""}`}
+          aria-label={`Banner preview for ${name || "your name"}${shown("designation", designation) ? `, ${designation}` : ""}${bg.text.trim() ? `, identity text ${bg.text.trim()}` : ""}`}
           data-testid="banner-canvas"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}

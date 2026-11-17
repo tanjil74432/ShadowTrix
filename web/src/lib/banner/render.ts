@@ -3,8 +3,9 @@
  * ONE universal layout for everybody. The same function paints the on-screen preview and the exported PNG, so what you see is what you
  * get: the canvas is always 1080 x 1350 and the preview is only that canvas scaled down with CSS.
  *
- * The "background text" is decoration chosen freely by the person (FOUNDER, MY TEAM, anything). It is drawn behind the portrait, is never
- * stored, and has nothing to do with the verified designation, which is a separate, server-approved line in the information panel.
+ * The "identity text" is decoration chosen freely by the person (FOUNDER, MY TEAM, anything). It is a large heading ABOVE the portrait (never
+ * behind or over it), is never stored, and has nothing to do with the verified designation, which is a separate, server-approved line in the
+ * information panel.
  */
 export const BANNER_W = 1080;
 export const BANNER_H = 1350;
@@ -24,20 +25,24 @@ export interface Crop {
   y: number;
 }
 
+/** The heading above the portrait. (The type keeps its early name; it is the "identity text" in the editor.) */
 export interface BackgroundText {
   text: string;
-  /** Font size in canvas pixels (60..320). Reduced automatically when the text would not fit. */
+  /** Font size in canvas pixels (60..200). Reduced automatically when the text would not fit the heading band. */
   size: number;
-  /** -1..1 position inside the free area (0 = centred on the top edge of the portrait). */
+  /** -1..1 position inside the free part of the heading band (0 = centred). */
   x: number;
   y: number;
-  /** 0.05..0.6 */
+  /** 0.15..1 */
   opacity: number;
-  /** Degrees, -30..30. */
+  /** Degrees, -12..12: a heading tilts slightly, it does not turn on its side. */
   rotation: number;
 }
 
-export const DEFAULT_BACKGROUND: BackgroundText = { text: "SHADOW", size: 200, x: 0, y: 0, opacity: 0.22, rotation: 0 };
+export const SIZE_RANGE = { min: 60, max: 200 } as const;
+export const OPACITY_RANGE = { min: 0.15, max: 1 } as const;
+export const ROTATION_RANGE = { min: -12, max: 12 } as const;
+export const DEFAULT_BACKGROUND: BackgroundText = { text: "SHADOW", size: 190, x: 0, y: 0, opacity: 0.92, rotation: 0 };
 
 export interface BannerInput {
   name: string;
@@ -59,10 +64,11 @@ export interface BannerInput {
 const C = {
   bg: "#090909", orange: "#f07832", deep: "#d95f1b", soft: "#ff9a55", light: "#ffb27a", fg: "#f5f5f5", silver: "#d4d4d4", muted: "#a3a3a3",
 };
-export const FRAME = { x: 190, y: 230, w: 810, h: 630 };
+export const FRAME = { x: 190, y: 215, w: 810, h: 645 };
 export const PANEL = { x: 190, y: 885, w: 810, h: 405 };
-/** Where the background text may sit: the band above the portrait, lining up with it (clear of the vertical wordmark), reaching a little behind its top edge. */
-export const BG_ZONE = { x: 190, y: 10, w: 870, h: 360 };
+/** The heading band: directly above the portrait, lined up with it (clear of the vertical wordmark), with a clear gap above the frame. Never overlaps the portrait. */
+export const BG_ZONE = { x: 190, y: 22, w: 810, h: 168 };
+export const HEADING_GAP = FRAME.y - (BG_ZONE.y + BG_ZONE.h); // space between the heading band and the portrait frame
 
 export const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
@@ -100,7 +106,7 @@ function background(): CanvasImageSource {
   };
   glow(1000, 1250, 760, 0.42);
   glow(60, 140, 520, 0.22);
-  glow(600, 330, 560, 0.16);
+  glow(600, 110, 520, 0.2); // soft light behind the heading band
 
   // Faint rows of brand text, drifting sideways row by row.
   g.save();
@@ -218,20 +224,20 @@ export interface BackgroundPlan {
   cy: number;
   rotation: number;
   opacity: number;
-  /** Axis-aligned box that contains the (rotated) text; always inside BG_ZONE. */
+  /** Axis-aligned box that contains the (rotated) text; always inside BG_ZONE, so above the portrait. */
   box: { x: number; y: number; w: number; h: number };
 }
 
 /**
- * Places the background text. The size is reduced until the rotated text fits the zone, and the position is limited so the box never leaves
- * the zone, so the text can never be clipped by the edge of the banner. Pure given a measuring context (unit-tested).
+ * Places the identity text. The size is reduced until the rotated text fits the heading band, and the position is limited so the box never
+ * leaves it: the text can neither be clipped by the edge of the banner nor touch the portrait. Pure given a measuring context (unit-tested).
  */
 export function planBackgroundText(g: CanvasRenderingContext2D, bg: BackgroundText, ff: string): BackgroundPlan | null {
   const text = bg.text.replace(/\s+/g, " ").trim().toUpperCase().slice(0, BG_TEXT_MAX);
   if (!text) return null;
-  const rotation = clamp(Number.isFinite(bg.rotation) ? bg.rotation : 0, -30, 30);
+  const rotation = clamp(Number.isFinite(bg.rotation) ? bg.rotation : 0, ROTATION_RANGE.min, ROTATION_RANGE.max);
   const rad = (rotation * Math.PI) / 180;
-  let size = clamp(Number.isFinite(bg.size) ? bg.size : DEFAULT_BACKGROUND.size, 60, 320);
+  let size = clamp(Number.isFinite(bg.size) ? bg.size : DEFAULT_BACKGROUND.size, SIZE_RANGE.min, SIZE_RANGE.max);
   let w = 0, h = 0, bw = 0, bh = 0;
   for (;;) {
     g.font = `800 ${size}px ${ff}`;
@@ -248,10 +254,21 @@ export function planBackgroundText(g: CanvasRenderingContext2D, bg: BackgroundTe
   const midY = BG_ZONE.y + BG_ZONE.h / 2;
   const cx = midX + (px * Math.max(0, BG_ZONE.w - bw)) / 2;
   const cy = midY + (py * Math.max(0, BG_ZONE.h - bh)) / 2;
-  return { text, size, cx, cy, rotation, opacity: clamp(Number.isFinite(bg.opacity) ? bg.opacity : DEFAULT_BACKGROUND.opacity, 0.05, 0.6), box: { x: cx - bw / 2, y: cy - bh / 2, w: bw, h: bh } };
+  return { text, size, cx, cy, rotation, opacity: clamp(Number.isFinite(bg.opacity) ? bg.opacity : DEFAULT_BACKGROUND.opacity, OPACITY_RANGE.min, OPACITY_RANGE.max), box: { x: cx - bw / 2, y: cy - bh / 2, w: bw, h: bh } };
 }
 
 function drawBackgroundText(g: CanvasRenderingContext2D, plan: BackgroundPlan, ff: string) {
+  const h = plan.size * 0.82; // cap height of the capitals that are drawn
+  // A soft burnt-orange glow behind the heading (it stays inside the band's neighbourhood; the portrait is drawn after it).
+  g.save();
+  const r = Math.max(plan.box.w, plan.box.h) * 0.62;
+  const glow = g.createRadialGradient(plan.cx, plan.cy, 0, plan.cx, plan.cy, r);
+  glow.addColorStop(0, `rgba(240,120,50,${0.34 * plan.opacity})`);
+  glow.addColorStop(1, "rgba(240,120,50,0)");
+  g.fillStyle = glow;
+  g.fillRect(plan.cx - r, plan.cy - r, 2 * r, 2 * r);
+  g.restore();
+
   g.save();
   g.translate(plan.cx, plan.cy);
   g.rotate((plan.rotation * Math.PI) / 180);
@@ -259,11 +276,20 @@ function drawBackgroundText(g: CanvasRenderingContext2D, plan: BackgroundPlan, f
   g.textBaseline = "alphabetic";
   g.font = `800 ${plan.size}px ${ff}`;
   g.lineJoin = "round";
-  g.fillStyle = `rgba(245,245,245,${plan.opacity})`;
-  g.strokeStyle = `rgba(240,120,50,${clamp(plan.opacity * 1.8, 0.1, 0.9)})`;
-  g.lineWidth = 2;
-  const baseline = (plan.size * 0.82) / 2; // vertically centre the capitals on (cx, cy)
+  g.globalAlpha = plan.opacity;
+  // Bright white at the top, silver in the middle, a touch of burnt orange at the foot, with an orange halo.
+  const fill = g.createLinearGradient(0, -h / 2, 0, h / 2);
+  fill.addColorStop(0, "#f5f5f5");
+  fill.addColorStop(0.62, "#d4d4d4");
+  fill.addColorStop(1, "#f08a4b");
+  const baseline = h / 2; // vertically centre the capitals on (cx, cy)
+  g.shadowColor = "rgba(240,120,50,0.55)";
+  g.shadowBlur = 26;
+  g.fillStyle = fill;
   g.fillText(plan.text, 0, baseline);
+  g.shadowBlur = 0;
+  g.strokeStyle = "rgba(255,154,85,0.75)";
+  g.lineWidth = 1.5;
   g.strokeText(plan.text, 0, baseline);
   g.restore();
 }
@@ -362,7 +388,7 @@ export function drawBanner(g: CanvasRenderingContext2D, input: BannerInput) {
   g.clearRect(0, 0, BANNER_W, BANNER_H);
   g.drawImage(background(), 0, 0);
 
-  // Customisable background text, behind the portrait and the information panel.
+  // Customisable identity text: a heading above the portrait.
   const bgPlan = planBackgroundText(g, input.background, ff);
   if (bgPlan) drawBackgroundText(g, bgPlan, ff);
 
@@ -411,8 +437,8 @@ export function drawBanner(g: CanvasRenderingContext2D, input: BannerInput) {
     ph.addColorStop(0, "#2b1a10"); ph.addColorStop(1, "#141414");
     g.fillStyle = ph; g.fillRect(FRAME.x, FRAME.y, FRAME.w, FRAME.h);
     g.fillStyle = "rgba(240,120,50,0.55)";
-    g.beginPath(); g.arc(FRAME.x + FRAME.w / 2, FRAME.y + 230, 105, 0, Math.PI * 2); g.fill();
-    g.beginPath(); g.ellipse(FRAME.x + FRAME.w / 2, FRAME.y + 580, 240, 230, 0, Math.PI, 0); g.fill();
+    g.beginPath(); g.arc(FRAME.x + FRAME.w / 2, FRAME.y + 240, 108, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(FRAME.x + FRAME.w / 2, FRAME.y + 595, 245, 235, 0, Math.PI, 0); g.fill();
     g.fillStyle = C.silver; g.textAlign = "center"; g.textBaseline = "alphabetic"; g.font = `600 30px ${ff}`;
     g.fillText("Upload a portrait", FRAME.x + FRAME.w / 2, FRAME.y + FRAME.h - 40);
   }

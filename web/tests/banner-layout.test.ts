@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BANNER_H, BANNER_W, BG_TEXT_MAX, BG_ZONE, DEFAULT_BACKGROUND, FRAME, PANEL, TEXT_X, planBackgroundText, planPanel, type BackgroundText } from "@/lib/banner/render";
+import { BANNER_H, BANNER_W, BG_TEXT_MAX, BG_ZONE, DEFAULT_BACKGROUND, FRAME, HEADING_GAP, OPACITY_RANGE, PANEL, ROTATION_RANGE, SIZE_RANGE, TEXT_X, planBackgroundText, planPanel, type BackgroundText } from "@/lib/banner/render";
 
 /** A measuring context that behaves like a proportional font: width grows with text length and font size. */
 function fakeContext() {
@@ -29,11 +29,16 @@ describe("one universal layout", () => {
     expect(PANEL.x + PANEL.w).toBeLessThanOrEqual(BANNER_W);
     expect(BG_ZONE.x).toBeGreaterThanOrEqual(0);
     expect(BG_ZONE.x + BG_ZONE.w).toBeLessThanOrEqual(BANNER_W);
-    expect(BG_ZONE.y + BG_ZONE.h).toBeLessThanOrEqual(FRAME.y + 220); // the text sits above and just behind the top of the photo
+    // Option A: the identity text is a heading ABOVE the photo, lined up with it, with a clear gap, never reaching into the frame
+    expect(BG_ZONE.y).toBeGreaterThanOrEqual(0);
+    expect(BG_ZONE.y + BG_ZONE.h).toBeLessThan(FRAME.y);
+    expect(HEADING_GAP).toBeGreaterThanOrEqual(20);
+    expect(BG_ZONE.x).toBe(FRAME.x);
+    expect(BG_ZONE.w).toBe(FRAME.w);
   });
 });
 
-describe("background text", () => {
+describe("identity text (the heading above the photo)", () => {
   const base: BackgroundText = { ...DEFAULT_BACKGROUND };
 
   it("an empty text draws nothing; the text is upper-cased, trimmed and limited", () => {
@@ -43,24 +48,34 @@ describe("background text", () => {
     expect(planBackgroundText(fakeContext(), { ...base, text: "a   b\n c" }, "sans-serif")?.text).toBe("A B C");
   });
 
-  it("whatever size, position, rotation and text length is chosen, the box stays inside the banner zone (no clipping)", () => {
-    const texts = ["JUDGE", "TEAM MEMBER", "ORGANIZER", "W".repeat(BG_TEXT_MAX), "I"];
-    for (const text of texts) for (const size of [-50, 60, 200, 320, 9999]) for (const rotation of [-90, -30, 0, 17, 30, 90]) for (const x of [-5, -1, 0, 0.4, 1, 5]) for (const y of [-5, -1, 0, 1, 5]) {
+  it("whatever size, position, rotation and text length is chosen, the box stays inside the heading band: no clipping and never over the photo", () => {
+    const texts = ["JUDGE", "TEAM MEMBER", "ORGANIZER", "CO-FOUNDER", "SHADOWTRIX", "W".repeat(BG_TEXT_MAX), "I", "A B"];
+    for (const text of texts) for (const size of [-50, 60, 190, 200, 320, 9999]) for (const rotation of [-90, -12, 0, 7, 12, 90]) for (const x of [-5, -1, 0, 0.4, 1, 5]) for (const y of [-5, -1, 0, 1, 5]) {
       const p = planBackgroundText(fakeContext(), { text, size, rotation, x, y, opacity: 0.2 }, "sans-serif")!;
       expect(p).not.toBeNull();
       expect(p.box.x).toBeGreaterThanOrEqual(BG_ZONE.x - EPS);
       expect(p.box.y).toBeGreaterThanOrEqual(BG_ZONE.y - EPS);
       expect(p.box.x + p.box.w).toBeLessThanOrEqual(BG_ZONE.x + BG_ZONE.w + EPS);
       expect(p.box.y + p.box.h).toBeLessThanOrEqual(BG_ZONE.y + BG_ZONE.h + EPS);
-      expect(p.size).toBeLessThanOrEqual(320);
-      expect(p.rotation).toBeGreaterThanOrEqual(-30);
-      expect(p.rotation).toBeLessThanOrEqual(30);
+      expect(p.box.y + p.box.h).toBeLessThanOrEqual(FRAME.y - HEADING_GAP + EPS); // a clear gap above the photo frame
+      expect(p.size).toBeLessThanOrEqual(SIZE_RANGE.max);
+      expect(p.rotation).toBeGreaterThanOrEqual(ROTATION_RANGE.min);
+      expect(p.rotation).toBeLessThanOrEqual(ROTATION_RANGE.max);
     }
   });
 
-  it("size grows the text until the zone is reached, and the sliders move it", () => {
+  it("short text keeps the size asked for; long text shrinks to fit the band instead of being cut", () => {
+    const short = planBackgroundText(fakeContext(), { ...base, text: "JUDGE", size: 150 }, "sans-serif")!;
+    expect(short.size).toBe(150);
+    const long = planBackgroundText(fakeContext(), { ...base, text: "W".repeat(BG_TEXT_MAX), size: 190 }, "sans-serif")!;
+    expect(long.size).toBeLessThan(190);
+    expect(long.box.w).toBeLessThanOrEqual(BG_ZONE.w + EPS);
+    expect(long.text).toHaveLength(BG_TEXT_MAX);
+  });
+
+  it("size grows the text until the band is reached, and the sliders move it", () => {
     const small = planBackgroundText(fakeContext(), { ...base, text: "JUDGE", size: 80 }, "sans-serif")!;
-    const large = planBackgroundText(fakeContext(), { ...base, text: "JUDGE", size: 240 }, "sans-serif")!;
+    const large = planBackgroundText(fakeContext(), { ...base, text: "JUDGE", size: 160 }, "sans-serif")!;
     expect(large.size).toBeGreaterThan(small.size);
     expect(small.size).toBe(80);
     const left = planBackgroundText(fakeContext(), { ...base, text: "JUDGE", size: 100, x: -1 }, "sans-serif")!;
@@ -71,18 +86,20 @@ describe("background text", () => {
     expect(down.cy).toBeGreaterThan(up.cy);
   });
 
-  it("opacity is limited to a partly transparent range, and non-numbers fall back to defaults", () => {
-    expect(planBackgroundText(fakeContext(), { ...base, opacity: 5 }, "sans-serif")!.opacity).toBe(0.6);
-    expect(planBackgroundText(fakeContext(), { ...base, opacity: 0 }, "sans-serif")!.opacity).toBe(0.05);
+  it("opacity stays within its range, and non-numbers fall back to defaults", () => {
+    expect(planBackgroundText(fakeContext(), { ...base, opacity: 5 }, "sans-serif")!.opacity).toBe(OPACITY_RANGE.max);
+    expect(planBackgroundText(fakeContext(), { ...base, opacity: 0 }, "sans-serif")!.opacity).toBe(OPACITY_RANGE.min);
     const bad = planBackgroundText(fakeContext(), { text: "OK", size: NaN, x: NaN, y: NaN, opacity: NaN, rotation: NaN }, "sans-serif")!;
     expect(bad.opacity).toBe(DEFAULT_BACKGROUND.opacity);
     expect(bad.rotation).toBe(0);
     expect(Number.isFinite(bad.cx) && Number.isFinite(bad.cy) && Number.isFinite(bad.size)).toBe(true);
   });
 
-  it("the default is decoration, not a role", () => {
+  it("the default is decoration, not a role, and is large and clearly readable", () => {
     expect(DEFAULT_BACKGROUND.text).toBe("SHADOW");
-    expect(DEFAULT_BACKGROUND.opacity).toBeLessThan(0.5);
+    expect(DEFAULT_BACKGROUND.opacity).toBeGreaterThanOrEqual(0.8);
+    expect(DEFAULT_BACKGROUND.size).toBeGreaterThanOrEqual(150);
+    expect(DEFAULT_BACKGROUND.rotation).toBe(0);
   });
 });
 
