@@ -29,7 +29,7 @@ async function BannerContent() {
       <p className="mt-2 mb-8 max-w-2xl text-fg-muted">
         Create the official ShadowTrix banner for sharing, for example on Facebook. Everything happens in your browser, so your photo is never uploaded.
       </p>
-      <BannerCreator subject={{ fullName: subject.fullName, designations: subject.designations }} />
+      <BannerCreator subject={{ fullName: subject.fullName, designations: subject.designations, templates: subject.templates, events: subject.events }} />
     </>
   );
 }

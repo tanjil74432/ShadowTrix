@@ -4,11 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { drawBanner, BANNER_H, BANNER_W, FRAME, NAME_MAX, PORTRAIT_MAX_BYTES, PORTRAIT_TYPES, TAGLINE_MAX, clamp, type Crop } from "@/lib/banner/render";
+import { TEMPLATES, type TemplateId } from "@/lib/banner/templates";
 import { site } from "@/lib/site";
 
 export interface BannerSubjectProps {
   fullName: string;
   designations: { id: string; label: string }[];
+  /** Templates this person may use (decided on the server from real records). Never empty: participant is always allowed. */
+  templates: TemplateId[];
+  /** Events this person is genuinely linked to. */
+  events: { id: string; title: string }[];
 }
 
 const MAX_EDGE = 2400; // portraits are downscaled on load so phones are not asked to repaint a 40-megapixel photo
@@ -50,6 +55,9 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
   const [name, setName] = useState(subject.fullName.slice(0, NAME_MAX));
   const [designationId, setDesignationId] = useState(subject.designations[0]?.id ?? "");
   const [tagline, setTagline] = useState("");
+  const allowed = subject.templates.length ? subject.templates : (["participant"] as TemplateId[]);
+  const [template, setTemplate] = useState<TemplateId>(allowed[0]);
+  const [eventId, setEventId] = useState("");
   const [crop, setCrop] = useState<Crop>(START);
   const [hasPortrait, setHasPortrait] = useState(false);
   const [version, setVersion] = useState(0); // bumps when an asset (portrait, logo, fonts) becomes ready
@@ -57,6 +65,7 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
   const [status, setStatus] = useState("");
 
   const designation = subject.designations.find((d) => d.id === designationId)?.label;
+  const event = subject.events.find((e) => e.id === eventId)?.title;
 
   const paint = useCallback(() => {
     const cv = canvasRef.current;
@@ -64,12 +73,12 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
     if (!cv || !g) return;
     const p = portraitRef.current;
     drawBanner(g, {
-      name, designation, tagline, crop,
+      template, name, designation, event, organization: site.operator, tagline, crop,
       portrait: p?.img ?? null, portraitSize: p ? { w: p.w, h: p.h } : null,
       logo: logoRef.current?.complete && logoRef.current.naturalWidth ? logoRef.current : null,
       fontFamily: typeof document === "undefined" ? "sans-serif" : getComputedStyle(document.body).fontFamily || "sans-serif",
     });
-  }, [name, designation, tagline, crop]);
+  }, [template, name, designation, event, tagline, crop]);
 
   useEffect(() => {
     cancelAnimationFrame(raf.current);
@@ -150,7 +159,19 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
   const slider = "w-full accent-[var(--color-accent)] disabled:opacity-40";
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:items-start">
-      <div className="space-y-5">
+      <div className="space-y-5 order-2 lg:order-1">
+        <fieldset className="space-y-2 rounded-lg border border-border p-4">
+          <legend className="px-1 text-sm font-medium">Template</legend>
+          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Banner template">
+            {allowed.map((id) => (
+              <label key={id} className={`cursor-pointer rounded-md border px-3 py-2 text-sm has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--color-accent)] ${template === id ? "border-[var(--color-accent)] bg-surface-2 font-semibold" : "border-border"}`}>
+                <input type="radio" name="banner-template" value={id} checked={template === id} onChange={() => setTemplate(id)} className="sr-only" />
+                {TEMPLATES[id].label}
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-fg-muted">{allowed.length > 1 ? "Only templates that match your role on ShadowTrix are offered." : "Role templates appear here once your role on ShadowTrix is on record."}</p>
+        </fieldset>
         <Field label="Portrait" hint="JPEG, PNG or WebP, up to 12 MB. The photo stays in your browser and is never uploaded.">
           {(c) => (
             <input
@@ -173,7 +194,7 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
           <label className="block text-sm">Up / down
             <input type="range" min={-1} max={1} step={0.01} value={crop.y} onChange={(e) => setCrop((c) => ({ ...c, y: Number(e.target.value) }))} className={slider} />
           </label>
-          <Button type="button" variant="secondary" size="sm" onClick={() => setCrop(START)}>Reset position</Button>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setCrop(START)}>Reset zoom and position</Button>
         </fieldset>
         <Field label="Name" required>
           {(c) => <Input {...c} value={name} maxLength={NAME_MAX} onChange={(e) => setName(e.target.value)} autoComplete="name" />}
@@ -189,6 +210,14 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
             </Select>
           )}
         </Field>
+        <Field label="Event" hint={subject.events.length ? "Only events you take part in are offered." : "No event is linked to your account yet."}>
+          {(c) => (
+            <Select {...c} value={eventId} onChange={(e) => setEventId(e.target.value)} disabled={subject.events.length === 0}>
+              <option value="">None</option>
+              {subject.events.map((e) => <option key={e.id} value={e.id}>{e.title}</option>)}
+            </Select>
+          )}
+        </Field>
         <Field label="Tagline" hint={`Up to ${TAGLINE_MAX} characters.`}>
           {(c) => <Input {...c} value={tagline} maxLength={TAGLINE_MAX} onChange={(e) => setTagline(e.target.value)} />}
         </Field>
@@ -199,13 +228,13 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
         <p role="status" className="sr-only">{status}</p>
         <p className="text-xs text-fg-muted">A banner is only a picture. It is not an official record and does not give anyone any access or permission on ShadowTrix.</p>
       </div>
-      <div className="mx-auto w-full max-w-[34rem]">
+      <div className="order-1 mx-auto w-full max-w-[34rem] lg:order-2 lg:sticky lg:top-24">
         <canvas
           ref={canvasRef}
           width={BANNER_W}
           height={BANNER_H}
           role="img"
-          aria-label={`Banner preview for ${name || "your name"}${designation ? `, ${designation}` : ""}`}
+          aria-label={`${TEMPLATES[template].label} banner preview for ${name || "your name"}${designation ? `, ${designation}` : ""}${event ? `, ${event}` : ""}`}
           data-testid="banner-canvas"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
