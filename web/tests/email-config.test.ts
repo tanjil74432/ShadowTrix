@@ -3,7 +3,8 @@ import { parseEnv } from "@/server/config/env";
 import { getDb } from "@/server/db/client";
 import { registerSchema } from "@/server/modules/auth/auth.schema";
 import { defaultDeps, registerUser, requestPasswordReset, resendVerification, type AuthDeps } from "@/server/modules/auth/auth.service";
-import { describeMailError, evaluateEmailConfig, type EmailConfigInput } from "@/server/modules/email/email-config";
+import { cleanSmtpCredential } from "@/server/config/smtp-credential";
+import { describeMailError, describeSmtpCredentialShape, evaluateEmailConfig, type EmailConfigInput } from "@/server/modules/email/email-config";
 import { checkHealth } from "@/server/modules/health/health.service";
 import { cleanup, ctx, makeHarness, uniqueEmail } from "./helpers/auth-harness";
 
@@ -54,7 +55,7 @@ describe("environment validation", () => {
     expect(() => parseEnv({ ...base, SMTP_PASSWORD: "x" })).toThrow(/SMTP_USER: SMTP_USER and SMTP_PASSWORD must be set together/);
     expect(parseEnv({ ...base, SMTP_USER: "me@gmail.com", SMTP_PASSWORD: "x" }).SMTP_USER).toBe("me@gmail.com");
     expect(parseEnv(base).SMTP_USER).toBeUndefined();
-    expect(parseEnv({ ...base, SMTP_USER: "", SMTP_PASSWORD: "" }).SMTP_PASSWORD).toBe("");
+    expect(parseEnv({ ...base, SMTP_USER: "", SMTP_PASSWORD: "" }).SMTP_PASSWORD).toBeUndefined();
   });
   it("the validation error never echoes a value", () => {
     try { parseEnv({ ...base, SMTP_USER: "private-user-name@gmail.com" }); } catch (e) { expect(String((e as Error).message)).not.toContain("private-user-name"); return; }
@@ -115,7 +116,9 @@ describe("a delivery failure is recorded safely", () => {
     }
     const rows = await getDb().auditLog.findMany({ where: { action: "email.delivery_failed" } });
     expect(rows).toHaveLength(1);
-    expect(rows[0].after).toEqual({ code: "EAUTH", responseCode: 535, command: "AUTH PLAIN" });
+    // a login rejection also records safe facts about the configured login (booleans and a length), never a value
+    expect(rows[0].after).toMatchObject({ code: "EAUTH", responseCode: 535, command: "AUTH PLAIN" });
+    expect(Object.keys((rows[0].after as { credentials: object }).credentials).sort()).toEqual(["gmailHost", "passwordHadStrayCharacters", "passwordLength", "passwordSet", "userHadStrayCharacters", "userIsEmailAddress", "userMatchesSender", "userSet"]);
     expect(JSON.stringify(rows[0])).not.toMatch(/example\.com|hunter2|Username/);
     expect(rows[0].actorId).toBeNull();
   });
@@ -135,5 +138,32 @@ describe("health reports email readiness without naming anything", () => {
     const r = await checkHealth();
     expect(r).toMatchObject({ status: "ok", database: "up", email: "ready" });
     expect(Object.keys(r).sort()).toEqual(["database", "email", "status", "time"]);
+  });
+});
+
+describe("SMTP credential hygiene", () => {
+  it("strips wrapping quotes, whitespace and a trailing newline; Gmail app password groups lose their spaces", () => {
+    expect(cleanSmtpCredential('  "me@gmail.com"\n')).toBe("me@gmail.com");
+    expect(cleanSmtpCredential("abcd efgh ijkl mnop", { host: "smtp.gmail.com", secret: true })).toBe("abcdefghijklmnop");
+    expect(cleanSmtpCredential('"abcd efgh ijkl mnop"\r\n', { host: "SMTP.GMAIL.COM", secret: true })).toBe("abcdefghijklmnop");
+    expect(cleanSmtpCredential("pass word", { host: "smtp.other.example", secret: true })).toBe("pass word"); // other providers: inner spaces are kept
+    expect(cleanSmtpCredential("   ")).toBeUndefined();
+    expect(cleanSmtpCredential(undefined)).toBeUndefined();
+  });
+
+  it("the environment parser applies the cleaning, so the transport receives the real login", () => {
+    const db = "postgresql://u:p@localhost:5433/db";
+    const env = parseEnv({ DATABASE_URL: db, SMTP_HOST: "smtp.gmail.com", SMTP_USER: ' "me@gmail.com" ', SMTP_PASSWORD: "abcd efgh ijkl mnop\n" });
+    expect(env.SMTP_USER).toBe("me@gmail.com");
+    expect(env.SMTP_PASSWORD).toBe("abcdefghijklmnop");
+    expect(parseEnv({ DATABASE_URL: db, SMTP_USER: "   ", SMTP_PASSWORD: "" }).SMTP_USER).toBeUndefined();
+  });
+
+  it("the shape report explains a rejection without containing any value", () => {
+    const good = describeSmtpCredentialShape({ host: "smtp.gmail.com", user: "me@gmail.com", password: "abcdefghijklmnop", from: "ShadowTrix <me@gmail.com>" });
+    expect(good).toEqual({ userSet: true, userIsEmailAddress: true, userMatchesSender: true, userHadStrayCharacters: false, passwordSet: true, passwordLength: 16, passwordHadStrayCharacters: false, gmailHost: true });
+    const bad = describeSmtpCredentialShape({ host: "smtp.gmail.com", user: "me", password: '"abcd efgh ijkl mnop"', from: "ShadowTrix <other@gmail.com>" });
+    expect(bad).toMatchObject({ userIsEmailAddress: false, userMatchesSender: false, passwordLength: 16, passwordHadStrayCharacters: true });
+    expect(JSON.stringify(bad)).not.toMatch(/abcd|me@gmail|other@/);
   });
 });

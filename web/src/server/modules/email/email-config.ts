@@ -1,5 +1,6 @@
 import "server-only";
 import { getEnv } from "@/server/config/env";
+import { cleanSmtpCredential, isGmailHost } from "@/server/config/smtp-credential";
 import { AppError } from "@/server/http/errors";
 import { log } from "@/server/logging/logger";
 
@@ -69,4 +70,40 @@ export function describeMailError(err: unknown): { code: string; responseCode?: 
   const command = typeof e.command === "string" && /^[A-Z][A-Z ]{1,15}$/.test(e.command) ? e.command : undefined;
   const responseCode = typeof e.responseCode === "number" && Number.isInteger(e.responseCode) && e.responseCode >= 100 && e.responseCode <= 599 ? e.responseCode : undefined;
   return { code, ...(responseCode ? { responseCode } : {}), ...(command ? { command } : {}) };
+}
+
+/**
+ * Facts about the configured login that explain a provider rejection (SMTP 535) without revealing any value: only booleans and the password
+ * length. Safe to store in the audit log and show to administrators.
+ */
+export interface SmtpCredentialShape {
+  userSet: boolean;
+  userIsEmailAddress: boolean;
+  userMatchesSender: boolean;
+  userHadStrayCharacters: boolean;
+  passwordSet: boolean;
+  passwordLength: number;
+  passwordHadStrayCharacters: boolean;
+  gmailHost: boolean;
+}
+
+export function describeSmtpCredentialShape(raw: { host?: string; user?: string; password?: string; from?: string }): SmtpCredentialShape {
+  const host = raw.host ?? "";
+  const user = cleanSmtpCredential(raw.user);
+  const password = cleanSmtpCredential(raw.password, { host, secret: true });
+  const sender = (raw.from ?? "").match(/<([^>]+)>/)?.[1] ?? (raw.from ?? "");
+  return {
+    userSet: Boolean(user),
+    userIsEmailAddress: Boolean(user && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user)),
+    userMatchesSender: Boolean(user && user.toLowerCase() === sender.trim().toLowerCase()),
+    userHadStrayCharacters: raw.user !== undefined && raw.user !== (user ?? ""),
+    passwordSet: Boolean(password),
+    passwordLength: password?.length ?? 0,
+    passwordHadStrayCharacters: raw.password !== undefined && raw.password !== (password ?? ""),
+    gmailHost: isGmailHost(host),
+  };
+}
+
+export function getSmtpCredentialShape(): SmtpCredentialShape {
+  return describeSmtpCredentialShape({ host: process.env.SMTP_HOST, user: process.env.SMTP_USER, password: process.env.SMTP_PASSWORD, from: process.env.EMAIL_FROM });
 }

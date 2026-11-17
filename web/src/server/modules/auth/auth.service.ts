@@ -6,7 +6,7 @@ import { getDb } from "@/server/db/client";
 import { AppError } from "@/server/http/errors";
 import { log } from "@/server/logging/logger";
 import { writeAudit } from "@/server/modules/audit/audit.service";
-import { assertEmailReady, describeMailError, getEmailStatus, type EmailStatus } from "@/server/modules/email/email-config";
+import { assertEmailReady, describeMailError, getEmailStatus, getSmtpCredentialShape, type EmailStatus } from "@/server/modules/email/email-config";
 import { smtpMailer, type Mail, type Mailer } from "@/server/modules/email/mailer";
 import {
   alreadyRegisteredEmail,
@@ -54,8 +54,10 @@ export function defaultDeps(): AuthDeps {
         task().catch(async (err) => {
           // Never the message (it can echo server replies or addresses): only a short code. The audit row makes a broken mail setup visible to administrators.
           const info = describeMailError(err);
-          log.error("auth.email_failed", undefined, info);
-          await writeAudit({ actorId: null, action: "email.delivery_failed", entityType: "system", entityId: "email", after: info }).catch(() => undefined);
+          // A provider login rejection (EAUTH / 535) also records facts about the configured login (booleans and a length, never a value) so the cause can be told apart.
+          const detail = info.code === "EAUTH" ? { ...info, credentials: getSmtpCredentialShape() } : info;
+          log.error("auth.email_failed", undefined, detail);
+          await writeAudit({ actorId: null, action: "email.delivery_failed", entityType: "system", entityId: "email", after: detail }).catch(() => undefined);
         });
       try {
         after(run);

@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { cleanSmtpCredential } from "./smtp-credential";
 
 /**
  * Environment configuration, validated once on first access.
@@ -43,6 +44,8 @@ const schema = z
     S3_ACCESS_KEY_ID: z.string().optional(),
     S3_SECRET_ACCESS_KEY: z.string().optional(),
   })
+  // Credentials pasted into a hosting dashboard often carry quotes, a newline or (Gmail app passwords) spaces that are not part of the value.
+  .transform((env) => ({ ...env, SMTP_USER: cleanSmtpCredential(env.SMTP_USER), SMTP_PASSWORD: cleanSmtpCredential(env.SMTP_PASSWORD, { host: env.SMTP_HOST, secret: true }) }))
   .superRefine((env, ctx) => {
     // Half a login is a configuration mistake in any environment: the provider would reject every message.
     if (Boolean(env.SMTP_USER) !== Boolean(env.SMTP_PASSWORD)) {
