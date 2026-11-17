@@ -7,6 +7,8 @@
  * behind or over it), is never stored, and has nothing to do with the verified designation, which is a separate, server-approved line in the
  * information panel.
  */
+import type { TemplateId } from "./template-registry";
+
 export const BANNER_W = 1080;
 export const BANNER_H = 1350;
 export const NAME_MAX = 60;
@@ -45,6 +47,9 @@ export const ROTATION_RANGE = { min: -12, max: 12 } as const;
 export const DEFAULT_BACKGROUND: BackgroundText = { text: "SHADOW", size: 190, x: 0, y: 0, opacity: 0.92, rotation: 0 };
 
 export interface BannerInput {
+  /** "classic" (default) or "matrix". Matrix is drawn only when `matrixRenderer` is present (administrators). */
+  template?: TemplateId;
+  matrixRenderer?: MatrixRenderer | null;
   name: string;
   /** The verified, server-approved designation (never free text). */
   designation?: string;
@@ -64,10 +69,12 @@ export interface BannerInput {
 const C = {
   bg: "#090909", orange: "#f07832", deep: "#d95f1b", soft: "#ff9a55", light: "#ffb27a", fg: "#f5f5f5", silver: "#d4d4d4", muted: "#a3a3a3",
 };
-export const FRAME = { x: 190, y: 215, w: 810, h: 645 };
-export const PANEL = { x: 190, y: 885, w: 810, h: 405 };
+/** The content column, centred between the vertical rule at x = 170 and the right edge (80 px each side): heading band, portrait and panel share it. */
+export const COLUMN = { x: 250, w: 750 } as const;
+export const FRAME = { x: COLUMN.x, y: 215, w: COLUMN.w, h: 645 };
+export const PANEL = { x: COLUMN.x, y: 885, w: COLUMN.w, h: 405 };
 /** The heading band: directly above the portrait, lined up with it (clear of the vertical wordmark), with a clear gap above the frame. Never overlaps the portrait. */
-export const BG_ZONE = { x: 190, y: 22, w: 810, h: 168 };
+export const BG_ZONE = { x: COLUMN.x, y: 22, w: COLUMN.w, h: 168 };
 export const HEADING_GAP = FRAME.y - (BG_ZONE.y + BG_ZONE.h); // space between the heading band and the portrait frame
 
 export const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
@@ -313,6 +320,8 @@ export interface PanelPlan {
   rows: PanelRow[];
   /** Lowest y used by any text; must stay inside the panel. */
   bottom: number;
+  /** The scale the typography was laid out at: above 1 when little is shown, below 1 when a lot is. */
+  scale: number;
   brand: ReturnType<typeof brandZones>;
 }
 
@@ -332,10 +341,17 @@ export function brandZones(captionWidth: number) {
 }
 const LOGO_BOTTOM = PANEL.y + PAD + LOGO + 40;
 
+const even = (n: number) => Math.round(n / 2) * 2;
+/** From generous (little is shown) to compact (everything is shown). The largest scale at which the content fits is used. */
+const SCALES = [1.7, 1.6, 1.5, 1.4, 1.3, 1.2, 1.1, 1, 0.92, 0.84, 0.76, 0.68, 0.6] as const;
+
 /**
- * Decides where every text block of the information panel goes. Rows only exist when they have text (the person chooses what to show).
- * If everything does not fit, the secondary rows shrink together, then fall back to one line each, so nothing overlaps or leaves the panel.
- * Pure given a measuring context, so tests can check it with worst-case input.
+ * Decides where every text block of the information panel goes, adapting to what is shown:
+ *  - rows only exist when they have text (the person chooses what to show), so there are no empty reserved rows;
+ *  - the typography is laid out at the largest scale that fits, so a banner with only a name or a couple of fields gets large, prominent
+ *    type and generous spacing, while a full one stays compact and readable (secondary rows shrink together, then fall back to one line);
+ *  - the finished block is centred in the space that is left, so a sparse panel does not look empty or top-heavy.
+ * Nothing overlaps or leaves the panel, and no line touches the logo or its caption. Pure given a measuring context (unit-tested).
  */
 export function planPanel(g: CanvasRenderingContext2D, input: Pick<BannerInput, "name" | "designation" | "university" | "department" | "event" | "team" | "tagline">, ff: string): PanelPlan {
   const innerW = PANEL.w - 2 * 40;
@@ -343,49 +359,138 @@ export function planPanel(g: CanvasRenderingContext2D, input: Pick<BannerInput, 
   const brand = brandZones(g.measureText(CAPTION).width);
   const nameW = innerW - Math.max(LOGO, brand.caption.w) - 30; // the logo and its caption sit at the top right
   const nameFont = (px: number) => `800 ${px}px ${ff}`;
-  const name = fitText(g, input.name.trim() || "Your name", nameW, 2, 64, 34, nameFont);
-  const nameBase = PANEL.y + PAD + name.px * 0.85;
-  const bar = nameBase + (name.lines.length - 1) * name.px * 1.05 + 16;
-  const top = bar + 5 + 18;
+  const nameText = input.name.trim() || "Your name";
+  const top0 = PANEL.y + PAD;
   const limit = PANEL.y + PANEL.h - BOTTOM_PAD;
 
   const spec = [
-    { key: "designation" as const, text: input.designation?.trim() ?? "", maxLines: 1, start: 34, min: 20, weight: 700, color: C.soft },
-    { key: "university" as const, text: input.university?.trim() ?? "", maxLines: 2, start: 30, min: 18, weight: 700, color: C.fg },
-    { key: "department" as const, text: input.department?.trim() ?? "", maxLines: 1, start: 26, min: 18, weight: 600, color: C.silver },
-    { key: "event" as const, text: input.event?.trim() ?? "", maxLines: 2, start: 26, min: 18, weight: 600, color: C.silver },
-    { key: "team" as const, text: input.team?.trim() ?? "", maxLines: 1, start: 26, min: 18, weight: 600, color: C.silver },
-    { key: "tagline" as const, text: input.tagline?.trim() ?? "", maxLines: 2, start: 24, min: 16, weight: 500, color: C.muted },
+    { key: "designation" as const, text: input.designation?.trim() ?? "", maxLines: 1, start: 34, cap: 42, min: 20, weight: 700, color: C.soft },
+    { key: "university" as const, text: input.university?.trim() ?? "", maxLines: 2, start: 30, cap: 38, min: 18, weight: 700, color: C.fg },
+    { key: "department" as const, text: input.department?.trim() ?? "", maxLines: 1, start: 26, cap: 34, min: 18, weight: 600, color: C.silver },
+    { key: "event" as const, text: input.event?.trim() ?? "", maxLines: 2, start: 26, cap: 34, min: 18, weight: 600, color: C.silver },
+    { key: "team" as const, text: input.team?.trim() ?? "", maxLines: 1, start: 26, cap: 34, min: 18, weight: 600, color: C.silver },
+    { key: "tagline" as const, text: input.tagline?.trim() ?? "", maxLines: 2, start: 24, cap: 32, min: 16, weight: 500, color: C.muted },
   ].filter((r) => r.text);
 
   const attempt = (scale: number, oneLine: boolean) => {
-    let y = top;
+    const air = Math.max(scale, 0.8); // spacing grows with the type but never collapses
+    // With nothing under it, a name may use a third line so it can grow large instead of leaving the panel empty.
+    const nameLines = spec.length === 0 && scale >= 1.3 ? 3 : 2;
+    const name = fitText(g, nameText, nameW, nameLines, even(clamp(64 * scale, 34, 92)), 34, nameFont);
+    const nameBase = top0 + name.px * 0.85;
+    const bar = nameBase + (name.lines.length - 1) * name.px * 1.05 + 16 * air;
+    let y = bar + 5 + 18 * air;
+    const gap = 10 * air;
     const rows: PanelRow[] = [];
     for (const r of spec) {
       const maxW = y < LOGO_BOTTOM ? nameW : innerW;
       const font = (px: number) => `${r.weight} ${px}px ${ff}`;
-      const f = fitText(g, r.text, maxW, oneLine ? 1 : r.maxLines, Math.round((r.start * scale) / 2) * 2, Math.max(14, Math.round((r.min * scale) / 2) * 2), font);
+      const min = Math.max(14, even(r.min * Math.min(scale, 1)));
+      const start = Math.max(min, even(Math.min(r.cap, r.start * scale)));
+      const f = fitText(g, r.text, maxW, oneLine ? 1 : r.maxLines, start, min, font);
       y += f.px * 0.85;
       rows.push({ key: r.key, px: f.px, font: font(f.px), lines: f.lines, baseline: y, color: r.color, maxW });
-      y += (f.lines.length - 1) * f.px * 1.2 + f.px * 0.3 + 10;
+      y += (f.lines.length - 1) * f.px * 1.2 + f.px * 0.3 + gap;
     }
-    return { rows, bottom: y - 10 };
+    return { name, nameBase, bar, rows, bottom: rows.length ? y - gap : bar + 5 };
   };
-  let chosen = attempt(1, false);
-  for (const s of [0.92, 0.84, 0.76, 0.68, 0.6]) {
-    if (chosen.bottom <= limit) break;
-    chosen = attempt(s, false);
+
+  let scale: number = SCALES[SCALES.length - 1];
+  let chosen: ReturnType<typeof attempt> | null = null;
+  for (const s of SCALES) {
+    const a = attempt(s, false);
+    if (a.bottom <= limit) { chosen = a; scale = s; break; }
   }
-  if (chosen.bottom > limit) chosen = attempt(0.6, true);
-  return { name: { px: name.px, font: nameFont(name.px), lines: name.lines, baseline: nameBase, maxW: nameW }, bar, rows: chosen.rows, bottom: Math.max(chosen.bottom, bar + 5), brand };
+  if (!chosen) chosen = attempt(scale, true);
+
+  // Centre the block in what is left (a sparse panel would otherwise sit at the top with an empty bottom).
+  const shift = clamp((limit - chosen.bottom) / 2, 0, 56);
+  return {
+    name: { px: chosen.name.px, font: nameFont(chosen.name.px), lines: chosen.name.lines, baseline: chosen.nameBase + shift, maxW: nameW },
+    bar: chosen.bar + shift,
+    rows: chosen.rows.map((r) => ({ ...r, baseline: r.baseline + shift })),
+    bottom: chosen.bottom + shift,
+    scale,
+    brand,
+  };
 }
 
 // ───────────────────────────── Drawing ─────────────────────────────
 
-export function drawBanner(g: CanvasRenderingContext2D, input: BannerInput) {
-  const { fontFamily: ff } = input;
+/** Everything the Matrix renderer is given. It draws the Matrix design; the portrait and the panel text come from here, so they behave identically in both templates. */
+export interface MatrixContext {
+  W: number;
+  H: number;
+  frame: typeof FRAME;
+  panel: typeof PANEL;
+  fontFamily: string;
+  /** The identity text and its controls, exactly as set in the editor. */
+  identity: BackgroundText;
+  /** Draws the uploaded photo (or the placeholder) inside the frame rectangle. The caller sets any clip first. The photo is never altered. */
+  drawPortrait: (g: CanvasRenderingContext2D) => void;
+  /** Draws the name, designation, details, logo and caption of the information panel. The caller draws the card behind it. */
+  drawPanelText: (g: CanvasRenderingContext2D) => void;
+}
+export type MatrixRenderer = (g: CanvasRenderingContext2D, ctx: MatrixContext) => void;
+
+/** The portrait inside the frame: cover-fit, zoom and position, a warm grade and a fade into the panel. Assumes the caller has clipped to the frame. */
+function paintPortrait(g: CanvasRenderingContext2D, input: BannerInput, ff: string) {
+  if (input.portrait && input.portraitSize) {
+    const { w, h } = input.portraitSize;
+    const zoom = clamp(input.crop.zoom, 1, 4);
+    const scale = Math.max(FRAME.w / w, FRAME.h / h) * zoom;
+    const dw = w * scale, dh = h * scale;
+    const ox = (dw - FRAME.w) / 2, oy = (dh - FRAME.h) / 2;
+    const dx = FRAME.x - ox - clamp(input.crop.x, -1, 1) * ox;
+    const dy = FRAME.y - oy - clamp(input.crop.y, -1, 1) * oy;
+    g.drawImage(input.portrait, dx, dy, dw, dh);
+    // Warm grade so every portrait sits in the same colour world, then fade the bottom into the info panel.
+    g.fillStyle = "rgba(217,95,27,0.08)";
+    g.fillRect(FRAME.x, FRAME.y, FRAME.w, FRAME.h);
+  } else {
+    const ph = g.createLinearGradient(FRAME.x, FRAME.y, FRAME.x + FRAME.w, FRAME.y + FRAME.h);
+    ph.addColorStop(0, "#2b1a10"); ph.addColorStop(1, "#141414");
+    g.fillStyle = ph; g.fillRect(FRAME.x, FRAME.y, FRAME.w, FRAME.h);
+    g.fillStyle = "rgba(240,120,50,0.55)";
+    g.beginPath(); g.arc(FRAME.x + FRAME.w / 2, FRAME.y + 240, 108, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(FRAME.x + FRAME.w / 2, FRAME.y + 595, 245, 235, 0, Math.PI, 0); g.fill();
+    g.fillStyle = C.silver; g.textAlign = "center"; g.textBaseline = "alphabetic"; g.font = `600 30px ${ff}`;
+    g.fillText("Upload a portrait", FRAME.x + FRAME.w / 2, FRAME.y + FRAME.h - 40);
+  }
+  const fade = g.createLinearGradient(0, FRAME.y + FRAME.h - 200, 0, FRAME.y + FRAME.h);
+  fade.addColorStop(0, "rgba(9,9,9,0)"); fade.addColorStop(1, "rgba(9,9,9,0.85)");
+  g.fillStyle = fade; g.fillRect(FRAME.x, FRAME.y + FRAME.h - 200, FRAME.w, 200);
+}
+
+/** The text of the information panel, the official logo and the brand caption. */
+function paintPanelText(g: CanvasRenderingContext2D, input: BannerInput, plan: PanelPlan, ff: string) {
+  const tx = TEXT_X;
   g.save();
-  g.clearRect(0, 0, BANNER_W, BANNER_H);
+  g.textAlign = "left"; g.textBaseline = "alphabetic";
+  g.fillStyle = C.fg;
+  g.font = plan.name.font;
+  plan.name.lines.forEach((line, i) => g.fillText(line, tx, plan.name.baseline + i * plan.name.px * 1.05));
+  const lineGrad = g.createLinearGradient(tx, 0, tx + 120, 0);
+  lineGrad.addColorStop(0, C.orange); lineGrad.addColorStop(1, C.soft);
+  g.fillStyle = lineGrad; g.fillRect(tx, plan.bar, 120, 5);
+  for (const row of plan.rows) {
+    g.font = row.font;
+    g.fillStyle = row.color;
+    row.lines.forEach((line, i) => g.fillText(line, tx, row.baseline + i * row.px * 1.2));
+  }
+  // Logo (the unchanged official mark) with a soft orange glow, and the brand caption under it.
+  if (input.logo) {
+    g.save();
+    g.shadowColor = "rgba(240,120,50,0.6)"; g.shadowBlur = 24;
+    g.drawImage(input.logo, PANEL.x + PANEL.w - 40 - LOGO, PANEL.y + PAD, LOGO, LOGO);
+    g.restore();
+  }
+  g.fillStyle = "rgba(255,154,85,0.85)"; g.font = captionFont(ff); g.textAlign = "right";
+  g.fillText(CAPTION, PANEL.x + PANEL.w - 40, PANEL.y + PAD + LOGO + 30);
+  g.restore();
+}
+
+function paintClassic(g: CanvasRenderingContext2D, input: BannerInput, ff: string) {
   g.drawImage(background(), 0, 0);
 
   // Customisable identity text: a heading above the portrait.
@@ -420,31 +525,7 @@ export function drawBanner(g: CanvasRenderingContext2D, input: BannerInput) {
   g.restore();
   g.save();
   g.beginPath(); g.rect(FRAME.x, FRAME.y, FRAME.w, FRAME.h); g.clip();
-  if (input.portrait && input.portraitSize) {
-    const { w, h } = input.portraitSize;
-    const zoom = clamp(input.crop.zoom, 1, 4);
-    const scale = Math.max(FRAME.w / w, FRAME.h / h) * zoom;
-    const dw = w * scale, dh = h * scale;
-    const ox = (dw - FRAME.w) / 2, oy = (dh - FRAME.h) / 2;
-    const dx = FRAME.x - ox - clamp(input.crop.x, -1, 1) * ox;
-    const dy = FRAME.y - oy - clamp(input.crop.y, -1, 1) * oy;
-    g.drawImage(input.portrait, dx, dy, dw, dh);
-    // Warm grade so every portrait sits in the same colour world, then fade the bottom into the info panel.
-    g.fillStyle = "rgba(217,95,27,0.08)";
-    g.fillRect(FRAME.x, FRAME.y, FRAME.w, FRAME.h);
-  } else {
-    const ph = g.createLinearGradient(FRAME.x, FRAME.y, FRAME.x + FRAME.w, FRAME.y + FRAME.h);
-    ph.addColorStop(0, "#2b1a10"); ph.addColorStop(1, "#141414");
-    g.fillStyle = ph; g.fillRect(FRAME.x, FRAME.y, FRAME.w, FRAME.h);
-    g.fillStyle = "rgba(240,120,50,0.55)";
-    g.beginPath(); g.arc(FRAME.x + FRAME.w / 2, FRAME.y + 240, 108, 0, Math.PI * 2); g.fill();
-    g.beginPath(); g.ellipse(FRAME.x + FRAME.w / 2, FRAME.y + 595, 245, 235, 0, Math.PI, 0); g.fill();
-    g.fillStyle = C.silver; g.textAlign = "center"; g.textBaseline = "alphabetic"; g.font = `600 30px ${ff}`;
-    g.fillText("Upload a portrait", FRAME.x + FRAME.w / 2, FRAME.y + FRAME.h - 40);
-  }
-  const fade = g.createLinearGradient(0, FRAME.y + FRAME.h - 200, 0, FRAME.y + FRAME.h);
-  fade.addColorStop(0, "rgba(9,9,9,0)"); fade.addColorStop(1, "rgba(9,9,9,0.85)");
-  g.fillStyle = fade; g.fillRect(FRAME.x, FRAME.y + FRAME.h - 200, FRAME.w, 200);
+  paintPortrait(g, input, ff);
   g.restore();
   // Double frame.
   g.strokeStyle = "rgba(240,120,50,0.85)"; g.lineWidth = 3;
@@ -462,28 +543,26 @@ export function drawBanner(g: CanvasRenderingContext2D, input: BannerInput) {
   g.strokeStyle = "rgba(240,120,50,0.65)"; g.lineWidth = 2;
   g.strokeRect(PANEL.x, PANEL.y, PANEL.w, PANEL.h);
 
-  const plan = planPanel(g, input, ff);
-  const tx = TEXT_X;
-  g.textAlign = "left"; g.textBaseline = "alphabetic";
-  g.fillStyle = C.fg;
-  g.font = plan.name.font;
-  plan.name.lines.forEach((line, i) => g.fillText(line, tx, plan.name.baseline + i * plan.name.px * 1.05));
-  const lineGrad = g.createLinearGradient(tx, 0, tx + 120, 0);
-  lineGrad.addColorStop(0, C.orange); lineGrad.addColorStop(1, C.soft);
-  g.fillStyle = lineGrad; g.fillRect(tx, plan.bar, 120, 5);
-  for (const row of plan.rows) {
-    g.font = row.font;
-    g.fillStyle = row.color;
-    row.lines.forEach((line, i) => g.fillText(line, tx, row.baseline + i * row.px * 1.2));
+  paintPanelText(g, input, planPanel(g, input, ff), ff);
+}
+
+/**
+ * Paints the banner. The Classic design is drawn here; the Matrix design is drawn by `input.matrixRenderer`, which only exists in the
+ * browser of an administrator (it is delivered by an endpoint that refuses everybody else). Without it the Classic design is drawn.
+ */
+export function drawBanner(g: CanvasRenderingContext2D, input: BannerInput) {
+  const { fontFamily: ff } = input;
+  g.save();
+  g.clearRect(0, 0, BANNER_W, BANNER_H);
+  if (input.template === "matrix" && input.matrixRenderer) {
+    const plan = planPanel(g, input, ff);
+    input.matrixRenderer(g, {
+      W: BANNER_W, H: BANNER_H, frame: FRAME, panel: PANEL, fontFamily: ff, identity: input.background,
+      drawPortrait: (gg) => paintPortrait(gg, input, ff),
+      drawPanelText: (gg) => paintPanelText(gg, input, plan, ff),
+    });
+  } else {
+    paintClassic(g, input, ff);
   }
-  // Logo (the unchanged official mark) with a soft orange glow, and the brand caption under it.
-  if (input.logo) {
-    g.save();
-    g.shadowColor = "rgba(240,120,50,0.6)"; g.shadowBlur = 24;
-    g.drawImage(input.logo, PANEL.x + PANEL.w - 40 - LOGO, PANEL.y + PAD, LOGO, LOGO);
-    g.restore();
-  }
-  g.fillStyle = "rgba(255,154,85,0.85)"; g.font = captionFont(ff); g.textAlign = "right";
-  g.fillText(CAPTION, PANEL.x + PANEL.w - 40, PANEL.y + PAD + LOGO + 30);
   g.restore();
 }

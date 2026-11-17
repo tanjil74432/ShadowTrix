@@ -495,3 +495,23 @@ form[role="search"] {
     transform: none;
   }
 }
+
+/* ───────────── Banner creator: fit-to-viewport editor (large screens) ─────────────
+   On large screens the editor fills the viewport: the form scrolls by itself and the banner preview stays fully in view, sized from the
+   available height and width at the banner's 4:5 shape (never stretched). The page itself does not scroll there, so the footer is hidden
+   on this one screen. Smaller or shorter screens keep the normal stacked page, which scrolls as usual.
+   The rules are keyed to `html[data-banner-fit]`, an attribute the editor sets only while it is on screen (and removes when the person
+   leaves the page or the page is kept hidden in the background), so no other page is ever affected. */
+@media (min-width: 1024px) and (min-height: 640px) {
+  html[data-banner-fit] { overflow: hidden; }
+  html[data-banner-fit] body { height: 100dvh; }
+  html[data-banner-fit] body > footer { display: none; }
+  html[data-banner-fit] main { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  html[data-banner-fit] .banner-page { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding-top: 0.75rem; padding-bottom: 1rem; }
+  html[data-banner-fit] .banner-page .banner-intro { display: none; }
+  html[data-banner-fit] .banner-page .banner-title { font-size: 1.5rem; line-height: 1.2; margin: 0 0 0.75rem; }
+  html[data-banner-fit] .banner-editor-fit { flex: 1 1 0; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  html[data-banner-fit] .banner-editor-fit .banner-form { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 0.75rem; scrollbar-gutter: stable; }
+  html[data-banner-fit] .banner-editor-fit .banner-preview { position: static; min-height: 0; height: 100%; max-width: none; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  html[data-banner-fit] .banner-editor-fit .banner-preview canvas { flex: 0 1 auto; min-height: 0; width: auto; height: auto; max-width: 100%; max-height: calc(100% - 1.75rem); }
+}

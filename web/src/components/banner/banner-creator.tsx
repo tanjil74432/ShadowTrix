@@ -1,17 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import {
   BANNER_H, BANNER_W, BG_TEXT_MAX, DEFAULT_BACKGROUND, FIELD_MAX, FRAME, NAME_MAX, OPACITY_RANGE, PORTRAIT_MAX_BYTES, PORTRAIT_TYPES, ROTATION_RANGE, SIZE_RANGE, TAGLINE_MAX, TEAM_MAX,
-  clamp, drawBanner, type BackgroundText, type Crop,
+  clamp, drawBanner, type BackgroundText, type Crop, type MatrixRenderer,
 } from "@/lib/banner/render";
+import { DEFAULT_TEMPLATE, EXPORT_CHECK_URL, MATRIX_RENDERER_URL, type TemplateId, type TemplateInfo } from "@/lib/banner/template-registry";
 import { site } from "@/lib/site";
 
 export interface BannerSubjectProps {
   fullName: string;
   designations: { id: string; label: string }[];
+}
+
+export interface BannerCreatorProps {
+  subject: BannerSubjectProps;
+  /** The templates the SERVER says this person may use (always includes Classic; Matrix only for administrators). */
+  templates: TemplateInfo[];
+  /** Desktop layout that keeps the whole banner in view: the form scrolls by itself and the preview stays put (needs the page wrapper with data-banner-fit). */
+  fit?: boolean;
 }
 
 const MAX_EDGE = 2400; // portraits are downscaled on load so phones are not asked to repaint a 40-megapixel photo
@@ -54,7 +63,7 @@ async function loadPortrait(file: File): Promise<{ img: ImageBitmap | HTMLImageE
   }
 }
 
-export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
+export function BannerCreator({ subject, templates, fit = false }: BannerCreatorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const logoRef = useRef<HTMLImageElement | null>(null);
   const portraitRef = useRef<{ img: ImageBitmap | HTMLImageElement; w: number; h: number } | null>(null);
@@ -74,6 +83,20 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
   const [version, setVersion] = useState(0); // bumps when an asset (portrait, logo, fonts) becomes ready
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [templateId, setTemplateId] = useState<TemplateId>(DEFAULT_TEMPLATE);
+  const [loadingTemplate, setLoadingTemplate] = useState(false);
+  const [pendingTemplate, setPendingTemplate] = useState<TemplateId | null>(null); // shown as selected while its code loads
+  const matrixRef = useRef<MatrixRenderer | null>(null);
+  const wanted = useRef<TemplateId>(DEFAULT_TEMPLATE); // the latest choice, so a slow load never overrides a later one
+
+  // The fit-to-viewport layout (see globals.css) is switched on while this editor is on screen and off again when it is unmounted or kept hidden
+  // in the background by the router, so it can never leak onto another page.
+  useLayoutEffect(() => {
+    if (!fit) return;
+    const root = document.documentElement;
+    root.setAttribute("data-banner-fit", "");
+    return () => root.removeAttribute("data-banner-fit");
+  }, [fit]);
 
   const designation = subject.designations.find((d) => d.id === designationId)?.label;
   const shown = (key: OptionalKey, value: string | undefined) => (show[key] && value?.trim() ? value : undefined);
@@ -84,6 +107,8 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
     if (!cv || !g) return;
     const p = portraitRef.current;
     drawBanner(g, {
+      template: templateId,
+      matrixRenderer: matrixRef.current,
       name,
       designation: shown("designation", designation),
       university: shown("university", university),
@@ -98,7 +123,7 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
       fontFamily: typeof document === "undefined" ? "sans-serif" : getComputedStyle(document.body).fontFamily || "sans-serif",
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `shown` only reads `show`, which is listed
-  }, [name, designation, university, department, event, team, tagline, show, bg, crop]);
+  }, [templateId, name, designation, university, department, event, team, tagline, show, bg, crop]);
 
   useEffect(() => {
     cancelAnimationFrame(raf.current);
@@ -163,8 +188,51 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
     }));
   }
 
+  /**
+   * Picks a template. Matrix needs the drawing code, which the server delivers only to administrators: for everybody else this fails (403)
+   * and the editor stays on Classic. The list of templates itself also comes from the server, so this is a second, independent check.
+   */
+  async function chooseTemplate(id: TemplateId) {
+    setError("");
+    wanted.current = id;
+    if (id === "classic") {
+      setPendingTemplate(null);
+      setTemplateId("classic");
+      return;
+    }
+    if (!matrixRef.current) {
+      setLoadingTemplate(true);
+      setPendingTemplate(id);
+      try {
+        const mod = (await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ MATRIX_RENDERER_URL)) as { default?: MatrixRenderer };
+        if (typeof mod.default !== "function") throw new Error("renderer");
+        matrixRef.current = mod.default;
+      } catch (err) {
+        console.error("banner: the Matrix template could not be loaded", err);
+        if (wanted.current === id) {
+          setError("The Matrix template is not available for your account.");
+          wanted.current = "classic";
+          setTemplateId("classic");
+        }
+        return;
+      } finally {
+        setLoadingTemplate(false);
+        setPendingTemplate(null);
+      }
+    }
+    if (wanted.current !== id) return; // the person chose something else while this was loading
+    setTemplateId("matrix");
+    setVersion((v) => v + 1);
+    setStatus("ShadowTrix Matrix template selected.");
+  }
+
   async function exportPng() {
     setError("");
+    if (templateId !== "classic") {
+      // The server decides whether this person may export this template, at the moment of export (a role can change while the page is open).
+      const res = await fetch(`${EXPORT_CHECK_URL}?template=${encodeURIComponent(templateId)}`, { credentials: "same-origin", cache: "no-store" }).catch(() => null);
+      if (!res || !res.ok) return setError("You do not have access to this template, so it cannot be exported.");
+    }
     await document.fonts?.ready;
     paint();
     const cv = canvasRef.current;
@@ -194,8 +262,22 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
   );
 
   return (
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:items-start">
-      <div className="order-2 space-y-5 lg:order-1">
+    <div className={`banner-editor grid gap-8 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:items-start ${fit ? "banner-editor-fit" : ""}`}>
+      <div className="banner-form order-2 space-y-5 lg:order-1">
+        {templates.length > 1 && (
+          <fieldset className="space-y-2 rounded-lg border border-border p-4">
+            <legend className="px-1 text-sm font-medium">Template</legend>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Banner template">
+              {templates.map((t) => (
+                <label key={t.id} className={`cursor-pointer rounded-md border px-3 py-2 text-sm has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--color-accent)] ${(pendingTemplate ?? templateId) === t.id ? "border-[var(--color-accent)] bg-surface-2 font-semibold" : "border-border"}`}>
+                  <input type="radio" name="banner-template" value={t.id} checked={(pendingTemplate ?? templateId) === t.id} onChange={() => void chooseTemplate(t.id)} className="sr-only" />
+                  {t.label}
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-fg-muted">{loadingTemplate ? "Loading the Matrix template…" : "Classic is the standard banner. Matrix is available to administrators."}</p>
+          </fieldset>
+        )}
         <Field label="Portrait" hint="JPEG, PNG or WebP, up to 12 MB. The photo stays in your browser and is never uploaded.">
           {(c) => (
             <input
@@ -287,19 +369,19 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
         <p role="status" className="sr-only">{status}</p>
         <p className="text-xs text-fg-muted">A banner is only a picture. It is not an official record and does not give anyone any access or permission on ShadowTrix.</p>
       </div>
-      <div className="order-1 mx-auto w-full max-w-[34rem] lg:order-2 lg:sticky lg:top-24">
+      <div className="banner-preview order-1 mx-auto w-full max-w-[34rem] lg:order-2 lg:sticky lg:top-24">
         <canvas
           ref={canvasRef}
           width={BANNER_W}
           height={BANNER_H}
           role="img"
-          aria-label={`Banner preview for ${name || "your name"}${shown("designation", designation) ? `, ${designation}` : ""}${bg.text.trim() ? `, identity text ${bg.text.trim()}` : ""}`}
+          aria-label={`${templateId === "matrix" ? "ShadowTrix Matrix" : "ShadowTrix Classic"} banner preview for ${name || "your name"}${shown("designation", designation) ? `, ${designation}` : ""}${bg.text.trim() ? `, identity text ${bg.text.trim()}` : ""}`}
           data-testid="banner-canvas"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={() => (drag.current = null)}
           onPointerCancel={() => (drag.current = null)}
-          className={`h-auto w-full rounded-lg shadow-card ${hasPortrait ? "cursor-grab touch-none active:cursor-grabbing" : ""}`}
+          className={`mx-auto h-auto w-full rounded-lg shadow-card lg:max-h-[calc(100dvh-8rem)] lg:w-auto lg:max-w-full ${hasPortrait ? "cursor-grab touch-none active:cursor-grabbing" : ""}`}
           style={{ aspectRatio: `${BANNER_W} / ${BANNER_H}` }}
         />
         {hasPortrait && <p className="mt-2 text-center text-xs text-fg-muted">Drag the preview to reposition the portrait.</p>}

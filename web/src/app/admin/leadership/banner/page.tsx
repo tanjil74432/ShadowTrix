@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Select } from "@/components/ui/field";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireUser } from "@/server/modules/auth/dal";
+import { availableTemplates } from "@/server/modules/banner/template-access";
 import { getBannerMember, listBannerMembers } from "@/server/modules/organization/banner.service";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -52,7 +53,7 @@ async function Content({ searchParams }: { searchParams: SearchParams }) {
           <Button type="submit">Open</Button>
         </form>
       )}
-      {subject && <div className="mt-8"><BannerCreator key={id.success ? id.data : "x"} subject={{ fullName: subject.fullName, designations: subject.designations }} /></div>}
+      {subject && <div className="mt-8"><BannerCreator key={id.success ? id.data : "x"} templates={availableTemplates(actor)} subject={{ fullName: subject.fullName, designations: subject.designations }} /></div>}
     </>
   );
 }

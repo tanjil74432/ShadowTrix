@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BANNER_H, BANNER_W, BG_TEXT_MAX, BG_ZONE, DEFAULT_BACKGROUND, FRAME, HEADING_GAP, OPACITY_RANGE, PANEL, ROTATION_RANGE, SIZE_RANGE, TEXT_X, planBackgroundText, planPanel, type BackgroundText } from "@/lib/banner/render";
+import { BANNER_H, BANNER_W, BG_TEXT_MAX, BG_ZONE, COLUMN, DEFAULT_BACKGROUND, FRAME, HEADING_GAP, OPACITY_RANGE, PANEL, ROTATION_RANGE, SIZE_RANGE, TEXT_X, planBackgroundText, planPanel, type BackgroundText } from "@/lib/banner/render";
 
 /** A measuring context that behaves like a proportional font: width grows with text length and font size. */
 function fakeContext() {
@@ -35,6 +35,20 @@ describe("one universal layout", () => {
     expect(HEADING_GAP).toBeGreaterThanOrEqual(20);
     expect(BG_ZONE.x).toBe(FRAME.x);
     expect(BG_ZONE.w).toBe(FRAME.w);
+  });
+});
+
+describe("the portrait frame is slightly narrower and centred", () => {
+  it("is modestly narrower than the previous 810 px, keeps its height, and has equal margins either side", () => {
+    expect(FRAME.w).toBeLessThan(810);
+    expect(FRAME.w).toBeGreaterThanOrEqual(700); // modest: not a dramatic change
+    expect(FRAME.h).toBe(645); // height preserved
+    // centred between the vertical rule (x = 170) and the right edge of the banner
+    const leftMargin = FRAME.x - 170, rightMargin = BANNER_W - (FRAME.x + FRAME.w);
+    expect(leftMargin).toBe(rightMargin);
+    expect(leftMargin).toBeGreaterThanOrEqual(60);
+    // the heading band, the frame and the information panel share one column
+    for (const box of [BG_ZONE, FRAME, PANEL]) { expect(box.x).toBe(COLUMN.x); expect(box.w).toBe(COLUMN.w); }
   });
 });
 
@@ -126,7 +140,7 @@ describe("information panel: nothing overlaps or leaves the panel, whatever is s
   for (const [label, input] of cases) {
     it(`${label}: every row fits its width, rows are in order and the last one ends inside the panel`, () => {
       const plan = planPanel(fakeContext(), input, "sans-serif");
-      expect(plan.name.lines.length).toBeLessThanOrEqual(2);
+      expect(plan.name.lines.length).toBeLessThanOrEqual(plan.rows.length === 0 && plan.scale >= 1.3 ? 3 : 2);
       for (const line of plan.name.lines) expect(measure(plan.name.font, line)).toBeLessThanOrEqual(plan.name.maxW + EPS);
       let prevEnd = plan.bar + 5;
       for (const row of plan.rows) {
@@ -164,5 +178,80 @@ describe("information panel: nothing overlaps or leaves the panel, whatever is s
     expect(planPanel(fakeContext(), { name: "A", event: "E", team: "T" }, "sans-serif").rows.map((r) => r.lines.join(" "))).toEqual(["E", "T"]);
     expect(planPanel(fakeContext(), { name: "A" }, "sans-serif").rows).toEqual([]);
     expect(planPanel(fakeContext(), { name: "A", university: "   ", tagline: "" }, "sans-serif").rows).toEqual([]);
+  });
+});
+
+describe("the information panel adapts to what is shown", () => {
+  const name = "Amina Rahman Chowdhury";
+  const uni = "Bangladesh University of Engineering and Technology";
+  const dept = "Computer Science and Engineering";
+  const all = { name, designation: "Verified designation", university: uni, department: dept, event: "ShadowTrix Spring Hackathon 2026", team: "Team Matrix", tagline: "Enter the Matrix of Innovation." };
+  const plan = (input: Parameters<typeof planPanel>[1]) => planPanel(fakeContext(), input, "sans-serif");
+
+  it("the fewer the fields, the larger the type: name only > name + university > name + university + department > everything", () => {
+    const a = plan({ name }), b = plan({ name, university: uni }), c = plan({ name, university: uni, department: dept }), d = plan(all);
+    expect(a.name.px).toBeGreaterThan(b.name.px - 1);
+    expect(b.name.px).toBeGreaterThanOrEqual(c.name.px);
+    expect(c.name.px).toBeGreaterThanOrEqual(d.name.px);
+    expect(a.scale).toBeGreaterThanOrEqual(b.scale);
+    expect(b.scale).toBeGreaterThanOrEqual(c.scale);
+    expect(c.scale).toBeGreaterThanOrEqual(d.scale);
+    expect(a.name.px).toBeGreaterThanOrEqual(70); // a sparse banner gets a large, prominent name
+    expect(plan({ name, university: uni }).rows[0].px).toBeGreaterThan(plan(all).rows.find((r) => r.key === "university")!.px - 1); // and larger details
+    expect(plan({ name, university: uni, department: dept }).rows[0].px).toBeGreaterThanOrEqual(30);
+  });
+
+  it("a full panel stays compact but readable", () => {
+    const d = plan(all);
+    expect(d.scale).toBeLessThanOrEqual(1.1);
+    for (const r of d.rows) expect(r.px).toBeGreaterThanOrEqual(16);
+    expect(d.name.px).toBeGreaterThanOrEqual(34);
+  });
+
+  it("the content is centred in the panel, so a sparse panel is not top-heavy and does not leave an empty bottom", () => {
+    for (const input of [{ name }, { name, university: uni }, { name, university: uni, department: dept }]) {
+      const p = plan(input);
+      const top = p.name.baseline - p.name.px * 0.85 - PANEL.y; // space above the block, from the panel's top edge
+      const bottomGap = PANEL.y + PANEL.h - p.bottom; // space below it
+      expect(Math.abs(top - bottomGap), JSON.stringify(input)).toBeLessThanOrEqual(60 + 24); // roughly balanced (the block sits beside the logo)
+      expect(bottomGap).toBeLessThanOrEqual(130); // never a large empty area under the text
+    }
+  });
+
+  it("hidden or empty optional fields leave no row and no gap", () => {
+    const rows = (input: Parameters<typeof planPanel>[1]) => plan(input).rows.map((r) => r.key);
+    expect(rows({ name })).toEqual([]);
+    expect(rows({ name, university: "   ", department: "", event: undefined })).toEqual([]);
+    expect(rows({ name, department: dept })).toEqual(["department"]);
+    expect(rows(all)).toEqual(["designation", "university", "department", "event", "team", "tagline"]);
+    // nothing is reserved for a hidden field: consecutive rows are exactly one normal line-gap apart, and the rest grow into the freed space
+    for (const input of [all, { ...all, department: undefined }, { ...all, designation: undefined, event: undefined, tagline: undefined }]) {
+      const p = plan(input);
+      const air = Math.max(p.scale, 0.8);
+      for (let i = 1; i < p.rows.length; i++) {
+        const prev = p.rows[i - 1], next = p.rows[i];
+        const expected = (prev.lines.length - 1) * prev.px * 1.2 + prev.px * 0.3 + 10 * air + next.px * 0.85;
+        expect(next.baseline - prev.baseline, `${prev.key} -> ${next.key}`).toBeCloseTo(expected, 3);
+      }
+    }
+    expect(plan({ ...all, department: undefined }).rows).toHaveLength(plan(all).rows.length - 1);
+    expect(plan({ ...all, department: undefined }).scale).toBeGreaterThanOrEqual(plan(all).scale);
+  });
+
+  it("long names, long university names and long taglines never overlap, leave the panel or touch the logo", () => {
+    const long = {
+      name: "Dr. Mohammad Abdul Karim Chowdhury Bhuiyan",
+      university: "The Bangladesh University of Engineering and Technology Extended Campus",
+      tagline: "Building things that matter, one commit at a time, together with the whole ShadowTrix community.",
+    };
+    for (const input of [long, { name: long.name }, { name: "Amina", tagline: long.tagline }, { ...long, department: "Department of Computer Science and Engineering Graduate Program", event: "ShadowTrix International Spring Hackathon and Datathon 2026 Grand Finals", team: "Team Matrix Innovators of the Eastern Region" }]) {
+      const p = plan(input);
+      expect(p.bottom).toBeLessThanOrEqual(PANEL.y + PANEL.h - 20);
+      let prevEnd = -Infinity;
+      for (const l of [{ y: p.name.baseline, px: p.name.px, n: p.name.lines.length, lead: 1.05 }, ...p.rows.map((r) => ({ y: r.baseline, px: r.px, n: r.lines.length, lead: 1.2 }))]) {
+        expect(l.y - l.px).toBeGreaterThanOrEqual(prevEnd - 1);
+        prevEnd = l.y + (l.n - 1) * l.px * l.lead;
+      }
+    }
   });
 });
