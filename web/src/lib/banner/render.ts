@@ -332,14 +332,13 @@ export const TEXT_X = PANEL.x + 40;
 const CAPTION = "TEAM EU SHADOW";
 const captionFont = (ff: string) => `600 18px ${ff}`;
 /** The top-right corner of the panel belongs to the official logo and the brand caption under it; text keeps clear of both. */
-export function brandZones(captionWidth: number) {
+export function brandZones(captionWidth: number, top: number = PANEL.y + PAD) {
   const right = PANEL.x + PANEL.w - 40;
   return {
-    logo: { x: right - LOGO, y: PANEL.y + PAD, w: LOGO, h: LOGO },
-    caption: { x: right - captionWidth, y: PANEL.y + PAD + LOGO + 30 - 18, w: captionWidth, h: 24 },
+    logo: { x: right - LOGO, y: top, w: LOGO, h: LOGO },
+    caption: { x: right - captionWidth, y: top + LOGO + 30 - 18, w: captionWidth, h: 24 },
   };
 }
-const LOGO_BOTTOM = PANEL.y + PAD + LOGO + 40;
 
 const even = (n: number) => Math.round(n / 2) * 2;
 /** From generous (little is shown) to compact (everything is shown). The largest scale at which the content fits is used. */
@@ -356,8 +355,8 @@ const SCALES = [1.7, 1.6, 1.5, 1.4, 1.3, 1.2, 1.1, 1, 0.92, 0.84, 0.76, 0.68, 0.
 export function planPanel(g: CanvasRenderingContext2D, input: Pick<BannerInput, "name" | "designation" | "university" | "department" | "event" | "team" | "tagline">, ff: string): PanelPlan {
   const innerW = PANEL.w - 2 * 40;
   g.font = captionFont(ff);
-  const brand = brandZones(g.measureText(CAPTION).width);
-  const nameW = innerW - Math.max(LOGO, brand.caption.w) - 30; // the logo and its caption sit at the top right
+  const capW = g.measureText(CAPTION).width;
+  const nameW = innerW - Math.max(LOGO, capW) - 30; // the logo and its caption sit at the top right
   const nameFont = (px: number) => `800 ${px}px ${ff}`;
   const nameText = input.name.trim() || "Your name";
   const top0 = PANEL.y + PAD;
@@ -376,14 +375,22 @@ export function planPanel(g: CanvasRenderingContext2D, input: Pick<BannerInput, 
     const air = Math.max(scale, 0.8); // spacing grows with the type but never collapses
     // With nothing under it, a name may use a third line so it can grow large instead of leaving the panel empty.
     const nameLines = spec.length === 0 && scale >= 1.3 ? 3 : 2;
-    const name = fitText(g, nameText, nameW, nameLines, even(clamp(64 * scale, 34, 92)), 34, nameFont);
+    const nameStart = even(clamp(64 * scale, 34, 92));
+    // A name that is too wide for the space beside the logo but fits the full width would wrap onto a second line. Instead it stays on one
+    // line and the logo group (logo + TEAM EU SHADOW) moves down, just far enough to clear that line. Names that already fit are untouched.
+    g.font = nameFont(nameStart);
+    const oneLineWidth = g.measureText(nameText).width;
+    const widened = oneLineWidth > nameW && oneLineWidth <= innerW;
+    const name = widened ? { px: nameStart, lines: [nameText] } : fitText(g, nameText, nameW, nameLines, nameStart, 34, nameFont);
+    const logoTop = widened ? top0 + nameStart * 1.1 + 14 : PANEL.y + PAD;
+    const logoBottom = logoTop + LOGO + 40;
     const nameBase = top0 + name.px * 0.85;
     const bar = nameBase + (name.lines.length - 1) * name.px * 1.05 + 16 * air;
     let y = bar + 5 + 18 * air;
     const gap = 10 * air;
     const rows: PanelRow[] = [];
     for (const r of spec) {
-      const maxW = y < LOGO_BOTTOM ? nameW : innerW;
+      const maxW = y < logoBottom ? nameW : innerW;
       const font = (px: number) => `${r.weight} ${px}px ${ff}`;
       const min = Math.max(14, even(r.min * Math.min(scale, 1)));
       const start = Math.max(min, even(Math.min(r.cap, r.start * scale)));
@@ -392,26 +399,31 @@ export function planPanel(g: CanvasRenderingContext2D, input: Pick<BannerInput, 
       rows.push({ key: r.key, px: f.px, font: font(f.px), lines: f.lines, baseline: y, color: r.color, maxW });
       y += (f.lines.length - 1) * f.px * 1.2 + f.px * 0.3 + gap;
     }
-    return { name, nameBase, bar, rows, bottom: rows.length ? y - gap : bar + 5 };
+    return { name, nameBase, bar, rows, bottom: rows.length ? y - gap : bar + 5, logoTop, widened };
   };
 
+  // Of the sizes at which everything fits, prefer the largest one that keeps the name on a single line without going below the base size
+  // (scale 1); a name that cannot be kept on one line (too long even at the base size) keeps the largest size that fits, as before.
   let scale: number = SCALES[SCALES.length - 1];
   let chosen: ReturnType<typeof attempt> | null = null;
+  const fitting: { s: number; a: ReturnType<typeof attempt> }[] = [];
   for (const s of SCALES) {
     const a = attempt(s, false);
-    if (a.bottom <= limit) { chosen = a; scale = s; break; }
+    if (a.bottom <= limit) fitting.push({ s, a });
   }
+  const pick = fitting.find((f) => f.s >= 1 && f.a.name.lines.length === 1) ?? fitting[0];
+  if (pick) { chosen = pick.a; scale = pick.s; }
   if (!chosen) chosen = attempt(scale, true);
 
   // Centre the block in what is left (a sparse panel would otherwise sit at the top with an empty bottom).
   const shift = clamp((limit - chosen.bottom) / 2, 0, 56);
   return {
-    name: { px: chosen.name.px, font: nameFont(chosen.name.px), lines: chosen.name.lines, baseline: chosen.nameBase + shift, maxW: nameW },
+    name: { px: chosen.name.px, font: nameFont(chosen.name.px), lines: chosen.name.lines, baseline: chosen.nameBase + shift, maxW: chosen.widened ? innerW : nameW },
     bar: chosen.bar + shift,
     rows: chosen.rows.map((r) => ({ ...r, baseline: r.baseline + shift })),
     bottom: chosen.bottom + shift,
     scale,
-    brand,
+    brand: brandZones(capW, chosen.widened ? chosen.logoTop + shift : chosen.logoTop),
   };
 }
 
@@ -482,11 +494,11 @@ function paintPanelText(g: CanvasRenderingContext2D, input: BannerInput, plan: P
   if (input.logo) {
     g.save();
     g.shadowColor = "rgba(240,120,50,0.6)"; g.shadowBlur = 24;
-    g.drawImage(input.logo, PANEL.x + PANEL.w - 40 - LOGO, PANEL.y + PAD, LOGO, LOGO);
+    g.drawImage(input.logo, plan.brand.logo.x, plan.brand.logo.y, LOGO, LOGO);
     g.restore();
   }
   g.fillStyle = "rgba(255,154,85,0.85)"; g.font = captionFont(ff); g.textAlign = "right";
-  g.fillText(CAPTION, PANEL.x + PANEL.w - 40, PANEL.y + PAD + LOGO + 30);
+  g.fillText(CAPTION, PANEL.x + PANEL.w - 40, plan.brand.caption.y + 18);
   g.restore();
 }
 

@@ -255,3 +255,75 @@ describe("the information panel adapts to what is shown", () => {
     }
   });
 });
+
+describe("a slightly longer name stays on one line: the logo group moves down instead", () => {
+  const ORIGINAL_LOGO_TOP = PANEL.y + 36;
+  const inputs = (name: string) => [
+    { name }, // sparse
+    { name, university: "Bangladesh University of Engineering and Technology" },
+    { name, designation: "Organizer", university: "BUET", department: "CSE", event: "Spring Hackathon 2026", team: "Team Matrix", tagline: "Enter the Matrix." },
+  ];
+  const sizes = Array.from({ length: 8 }, (_, i) => Array.from({ length: i + 1 }, () => "Abdul").join(" "));
+
+  it("three outcomes, depending only on the name: it fits beside the logo (nothing moves), it fits the full width (one line, logo moves down), or it wraps as before", () => {
+    const seen = { fits: false, widened: false, wraps: false };
+    for (const name of sizes) for (const input of inputs(name)) {
+      const p = planPanel(fakeContext(), input, "sans-serif");
+      const nameBottom = p.name.baseline + p.name.px * 0.25;
+      if (p.name.maxW === PANEL.w - 80) {
+        seen.widened = true;
+        expect(p.name.lines, name).toHaveLength(1); // stays on one line
+        expect(p.brand.logo.y, name).toBeGreaterThan(ORIGINAL_LOGO_TOP); // the group moved down...
+        expect(p.brand.logo.y, name).toBeGreaterThanOrEqual(nameBottom + 8); // ...just clear of the name line
+        expect(p.brand.caption.y + p.brand.caption.h, name).toBeLessThanOrEqual(PANEL.y + PANEL.h - 12); // and stays inside the panel
+      } else if (p.name.lines.length === 1) {
+        seen.fits = true;
+        expect(p.brand.logo.y, name).toBe(ORIGINAL_LOGO_TOP); // a name that already fitted changes nothing
+      } else {
+        seen.wraps = true;
+        expect(p.brand.logo.y, name).toBe(ORIGINAL_LOGO_TOP); // a name that is too long for the full width wraps exactly as before
+      }
+    }
+    expect(seen, "the sample covers every outcome").toEqual({ fits: true, widened: true, wraps: true });
+  });
+
+  it("the name is never shrunk to fit: its size is exactly what the panel's own scale gives it", () => {
+    const scaleSize = (scale: number) => Math.round(Math.min(92, Math.max(34, 64 * scale)) / 2) * 2;
+    let checked = 0;
+    for (const name of sizes) for (const input of inputs(name)) {
+      const p = planPanel(fakeContext(), input, "sans-serif");
+      if (p.name.maxW === PANEL.w - 80) { expect(p.name.px, name).toBe(scaleSize(p.scale)); checked++; }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it("any name that fits the full width at the base size (64 px) stays on one line, at no less than the base size", () => {
+    const innerW = PANEL.w - 80;
+    let checked = 0;
+    for (const name of sizes) for (const input of inputs(name)) {
+      if (name.length * 64 * 0.58 > innerW) continue; // too long even at the base size: it wraps, as before
+      const p = planPanel(fakeContext(), input, "sans-serif");
+      expect(p.name.lines, `${name} / ${Object.keys(input).length} fields`).toHaveLength(1);
+      expect(p.name.px, name).toBeGreaterThanOrEqual(64);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(6);
+  });
+
+  it("the logo and its caption stay visible, inside the panel, aligned to the same right edge, and never touch any text line", () => {
+    for (const name of sizes) for (const input of inputs(name)) {
+      const p = planPanel(fakeContext(), input, "sans-serif");
+      const right = PANEL.x + PANEL.w - 40;
+      expect(p.brand.logo.x + p.brand.logo.w).toBe(right);
+      expect(p.brand.caption.x + p.brand.caption.w).toBeCloseTo(right, 5);
+      expect(p.brand.logo.y).toBeGreaterThanOrEqual(PANEL.y + 36);
+      expect(p.brand.caption.y + p.brand.caption.h).toBeLessThanOrEqual(PANEL.y + PANEL.h);
+      const lines = [{ text: p.name.lines[0], font: p.name.font, y: p.name.baseline, px: p.name.px }, ...p.rows.flatMap((r) => r.lines.map((text, i) => ({ text, font: r.font, y: r.baseline + i * r.px * 1.2, px: r.px })))];
+      for (const l of lines) for (const zone of [p.brand.logo, p.brand.caption]) {
+        const box = { x: TEXT_X, y: l.y - l.px * 0.85, w: measure(l.font, l.text), h: l.px * 1.1 };
+        const overlaps = box.x < zone.x + zone.w + 8 && box.x + box.w > zone.x - 8 && box.y < zone.y + zone.h + 4 && box.y + box.h > zone.y - 4;
+        expect(overlaps, `"${l.text}" vs the logo group (${name})`).toBe(false);
+      }
+    }
+  });
+});
