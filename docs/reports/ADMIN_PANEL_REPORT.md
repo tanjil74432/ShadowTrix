@@ -33,7 +33,7 @@ Documented in `docs/api/admin-api.md` ("Administration consoles"). New: `GET /ad
 
 ## 5. Database changes
 
-One additive migration `20261120090000_admin_panel` (no existing data touched, safe defaults): enums `EventReviewStatus`, `AnnouncementAudience`; `events` gets `review_status` (default `NOT_SUBMITTED`), `review_note`, `reviewed_at`, `reviewed_by_id` (FK, `SET NULL`), an index and a CHECK that a rejection or change request carries a reason of at least 5 characters; `announcements` gets `audience`, `updated_at`, `updated_by_id`. No new tables. Verified: applies on a clean database, `prisma migrate diff` shows no drift. **Not applied to the production database** (applying it is a separate, owner-approved step: `node scripts/neon.mjs deploy`).
+One additive migration `20261120090000_admin_panel` (no existing data touched, safe defaults): enums `EventReviewStatus`, `AnnouncementAudience`; `events` gets `review_status` (default `NOT_SUBMITTED`), `review_note`, `reviewed_at`, `reviewed_by_id` (FK, `SET NULL`), an index and a CHECK that a rejection or change request carries a reason of at least 5 characters; `announcements` gets `audience`, `updated_at`, `updated_by_id`. No new tables. Verified: applies on a clean database, `prisma migrate diff` shows no drift. Applied to the production database on 2026-11-17 (section 11).
 
 ## 6. Permission matrix
 
@@ -68,7 +68,7 @@ Every change runs in a transaction with its audit row: `event.review_submitted|a
 - Reasons are collected with the browser prompt (the existing `ApiButton` convention), success feedback is an inline status line rather than a toast, and loading uses the existing skeleton fallbacks.
 - Maintenance mode pauses writes, not reads; the cached state can lag up to 5 seconds per instance.
 - Scheduled announcements need no job but only appear once their time passes and a page loads.
-- The migration is not applied to production; real production behavior of the new pages is unverified until it is deployed.
+- The migration is applied to production (section 11), but the new pages run in production only after the code is deployed; their production behavior is unverified until then.
 
 ## 10. Final commit and CI
 
@@ -79,3 +79,9 @@ Local results before the push: `tsc` and `eslint` clean; `prisma validate` valid
 ## Screenshots
 
 `docs/reports/admin-panel/` (desktop 1440 px for every page; phone 390 px for overview, event review, submission, announcement and maintenance). Captured from the e2e server with seeded demonstration data (`ADMIN_SHOTS=1 npx playwright test --project=chromium e2e/admin-screenshots.spec.ts`).
+
+## 11. Production migration (2026-11-17)
+
+Target verified with `node scripts/neon.mjs check`: Neon project `hidden-shadow-26313462`, database `neondb`, 13 migrations recorded and 0 unfinished before. The SQL was reviewed first: purely additive (two enum types, seven new nullable or defaulted columns on `events` and `announcements`, one index, two foreign keys with `SET NULL`, one CHECK on the new column), no existing row is rewritten. `node scripts/neon.mjs deploy` applied `20261120090000_admin_panel`; afterwards `verify` reported 14 migrations (0 unfinished, 0 rolled back), structure identical to the local database, `prisma migrate diff` empty, and row counts unchanged (2 users, 2 user roles).
+
+Recovery: the Neon restore window could not be queried (no Neon API token here), so it is not claimed. Instead a manual rollback script was written and tested: `docs/operations/rollback-admin-panel-migration.sql` was run against a scratch database after applying all 14 migrations, removed every new column, constraint, index and type, and the migration re-applied cleanly afterwards.
