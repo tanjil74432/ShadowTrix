@@ -2,7 +2,7 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { COOKIE, createRawSession, db, expect, test, uiLogin } from "./helpers/fixtures";
 
 const OUT = path.resolve(__dirname, "../ui-review/banner");
@@ -23,6 +23,52 @@ async function fakePhoto(page: Page) {
     return c.toDataURL("image/jpeg", 0.9);
   });
   return Buffer.from(dataUrl.split(",")[1], "base64");
+}
+
+/** Adds the synthetic photo and waits until the editor has accepted it; retries because the first attempt can land before the page has hydrated. */
+async function addPhoto(page: Page) {
+  const buffer = await fakePhoto(page);
+  for (let attempt = 0; attempt < 6; attempt++) {
+    await page.locator('input[type="file"]').setInputFiles({ name: "me.jpg", mimeType: "image/jpeg", buffer });
+    if (await page.getByText("Drag the preview to reposition the portrait.").isVisible({ timeout: 2500 }).catch(() => false)) return;
+    await settle(page);
+  }
+  throw new Error("the editor never accepted the portrait");
+}
+
+/** Waits until the page font is loaded in every weight the banner uses and the repaint that follows has run, so a snapshot of the preview is final. */
+async function settle(page: Page) {
+  await page.evaluate(async () => {
+    const family = getComputedStyle(document.body).fontFamily;
+    await Promise.all([500, 600, 700, 800].map((w) => document.fonts.load(`${w} 24px ${family}`)));
+    await document.fonts.ready;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  });
+  await page.waitForTimeout(200);
+}
+
+/**
+ * Pixel comparison of two PNG data URLs, done in the browser. Chromium can rasterise the canvas on the GPU or the CPU (it may switch after
+ * repeated pixel read-backs), which moves a handful of anti-aliased pixels by one level out of 255; that is invisible, so "the same picture"
+ * means: no channel differs by more than 2 and fewer than 0.05% of the pixels differ at all.
+ */
+async function samePicture(page: Page, a: string, b: string) {
+  const d = await page.evaluate(async ([x, y]) => {
+    const load = async (u: string) => { const i = new Image(); i.src = u; await i.decode(); const c = document.createElement("canvas"); c.width = i.width; c.height = i.height; const g = c.getContext("2d")!; g.drawImage(i, 0, 0); return g.getImageData(0, 0, c.width, c.height); };
+    const A = await load(x), B = await load(y);
+    if (A.width !== B.width || A.height !== B.height) return { n: 1, maxd: 255, total: 1 };
+    let n = 0, maxd = 0;
+    for (let i = 0; i < A.data.length; i += 4) { const m = Math.max(Math.abs(A.data[i] - B.data[i]), Math.abs(A.data[i + 1] - B.data[i + 1]), Math.abs(A.data[i + 2] - B.data[i + 2]), Math.abs(A.data[i + 3] - B.data[i + 3])); if (m) { n++; if (m > maxd) maxd = m; } }
+    return { n, maxd, total: A.width * A.height };
+  }, [a, b]);
+  return d.maxd <= 2 && d.n / d.total < 0.0005;
+}
+
+/** The downloaded file is exactly what the canvas holds after the download, and is the same picture as the preview seen before it. */
+async function expectExportMatches(page: Page, canvas: Locator, previewDataUrl: string, file: Buffer) {
+  const after = await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL("image/png"));
+  expect(file.equals(Buffer.from(after.split(",")[1], "base64"))).toBe(true);
+  expect(await samePicture(page, previewDataUrl, "data:image/png;base64," + file.toString("base64"))).toBe(true);
 }
 
 async function member(userId: string | undefined, opts: { placeholder?: boolean; position?: string } = {}) {
@@ -77,15 +123,15 @@ test.describe("official banner creator", () => {
     await expect(page.getByRole("alert").filter({ hasText: /JPEG, PNG or WebP/ })).toBeVisible();
     expect(await page.getByLabel(/^Name/).getAttribute("maxlength")).toBe("60");
 
-    await page.locator('input[type="file"]').setInputFiles({ name: "me.jpg", mimeType: "image/jpeg", buffer: await fakePhoto(page) });
+    await addPhoto(page);
     await expect(page.getByText("Drag the preview to reposition the portrait.")).toBeVisible();
     await page.getByLabel("Zoom").fill("1.6");
-    await page.getByLabel("Left / right").fill("0.4");
-    await page.getByLabel("Up / down").fill("-0.3");
+    await page.getByLabel("Left / right", { exact: true }).fill("0.4");
+    await page.getByLabel("Up / down", { exact: true }).fill("-0.3");
     await page.getByLabel(/^Name/).fill("Priyanka Wickramasinghe-Balasubramaniam Longname");
     await page.getByLabel(/^Tagline/).fill("Building things that matter, one commit at a time, together with the whole ShadowTrix community.");
     const canvas = page.getByTestId("banner-canvas");
-    await page.waitForTimeout(500);
+    await settle(page);
     fs.mkdirSync(OUT, { recursive: true });
     await canvas.screenshot({ path: path.join(OUT, "plain-long-name.png") });
 
@@ -95,7 +141,7 @@ test.describe("official banner creator", () => {
     expect(dl.suggestedFilename()).toMatch(/^shadowtrix-banner-[a-z0-9-]+\.png$/);
     const buf = fs.readFileSync((await dl.path())!);
     expect(pngSize(buf)).toEqual({ w: 1080, h: 1350 });
-    expect(buf.equals(Buffer.from(preview.data.split(",")[1], "base64"))).toBe(true); // preview and export are the same pixels
+    await expectExportMatches(page, canvas, preview.data, buf);
   });
 
   test("a verified member can choose only an approved designation; placeholders and others are not offered", async ({ page, users }) => {
@@ -109,8 +155,8 @@ test.describe("official banner creator", () => {
     const options = await select.locator("option").allTextContents();
     expect(options).toEqual(["None", mine.designation!.title]);
     await page.getByLabel(/^Tagline/).fill("Team EU Shadow");
-    await page.locator('input[type="file"]').setInputFiles({ name: "me.jpg", mimeType: "image/jpeg", buffer: await fakePhoto(page) });
-    await page.waitForTimeout(500);
+    await addPhoto(page);
+    await settle(page);
     await page.getByTestId("banner-canvas").screenshot({ path: path.join(OUT, "member-designation.png") });
     await cleanup([mine]);
   });
@@ -139,94 +185,134 @@ test.describe("official banner creator", () => {
     await cleanup([real, fake]);
   });
 
-  test("templates are offered only to people whose records support them; each renders differently and exports exactly what the preview shows", async ({ page, users }) => {
+  test("one universal layout: no role templates, a free background text that is not a designation, and every control changes the artwork", async ({ page, users }) => {
     test.setTimeout(240_000);
     await page.emulateMedia({ reducedMotion: "reduce" });
     const SHOTS = process.env.BANNER_SHOTS ? path.resolve(__dirname, "../../docs/reports/banner-redesign") : OUT;
     fs.mkdirSync(SHOTS, { recursive: true });
-
-    // an ordinary person: participant only, no event choices
-    const plain = await users.create({ fullName: "Plain Template Person" });
-    await uiLogin(page, plain, "/dashboard/banner");
-    await expect(page.getByRole("radio")).toHaveCount(1);
-    await expect(page.getByRole("radio", { name: "Participant" })).toBeChecked();
-    await expect(page.getByLabel(/^Event/)).toBeDisabled();
-
-    // a person with every record: all six templates, and only their own events
-    await page.context().clearCookies();
-    const all = await users.create({ roles: ["ORGANIZER", "JUDGE"], fullName: "Amina Rahman Chowdhury" });
-    const mine = await member(all.id, { position: "Founder" });
-    const second = await db().designation.create({ data: { title: `Co-Founder ${tag()}`, rankOrder: 2 } });
-    await db().orgMembership.create({ data: { memberId: mine.m.id, unitId: mine.unit.id, designationId: second.id } });
-    const now = Date.now();
-    const ev = (title: string, createdById: string) => db().event.create({
-      data: { slug: `e2e-bt-${tag()}`, title, category: "HACKATHON", summary: "s", description: "d", createdById, status: "PUBLISHED", startsAt: new Date(now + 86_400_000), endsAt: new Date(now + 2 * 86_400_000), registrationOpensAt: new Date(now - 86_400_000), registrationClosesAt: new Date(now + 43_200_000) },
-    });
-    const owned = await ev("ShadowTrix International Spring Hackathon 2026 Grand Finals and Awards", all.id);
-    const strangers = await ev("E2E Someone Else Event", plain.id);
-    await db().eventOrganizer.create({ data: { eventId: owned.id, userId: all.id, isLead: true } });
-    try {
-      await uiLogin(page, all, "/dashboard/banner");
-      await expect(page.getByRole("radio")).toHaveCount(6);
-      expect((await page.getByRole("radio").evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value))).sort()).toEqual(["co-founder", "founder", "judge", "organizer", "participant", "team-member"]);
-      const events = await page.getByLabel(/^Event/).locator("option").allTextContents();
-      expect(events).toEqual(["None", owned.title]);
-      expect(events.join()).not.toContain("Someone Else");
-      expect(await page.getByLabel(/^Designation/).locator("option").count()).toBe(3); // None + Founder + Co-Founder
-
-      await page.locator('input[type="file"]').setInputFiles({ name: "me.jpg", mimeType: "image/jpeg", buffer: await fakePhoto(page) });
-      await expect(page.getByText("Drag the preview to reposition the portrait.")).toBeVisible();
-      await page.getByLabel(/^Event/).selectOption(owned.id);
-      await page.getByLabel(/^Tagline/).fill("Enter the Matrix of Innovation.");
-      const canvas = page.getByTestId("banner-canvas");
-      const seen = new Set<string>();
-      for (const id of ["founder", "co-founder", "organizer", "participant", "team-member", "judge"]) {
-        await page.locator(`input[name="banner-template"][value="${id}"]`).check({ force: true });
-        await expect(canvas).toHaveAttribute("aria-label", new RegExp(id === "team-member" ? "Team member" : id === "co-founder" ? "Co-Founder" : id, "i"));
-        await page.waitForTimeout(450);
-        const data = await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL("image/png"));
-        expect(seen.has(data)).toBe(false); // every template looks different
-        seen.add(data);
-        fs.writeFileSync(path.join(SHOTS, `template-${id}.png`), Buffer.from(data.split(",")[1], "base64")); // the real artwork, not a page screenshot
-        const [dl] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /Download PNG/ }).click()]);
-        const buf = fs.readFileSync((await dl.path())!);
-        expect(pngSize(buf)).toEqual({ w: 1080, h: 1350 });
-        expect(buf.equals(Buffer.from(data.split(",")[1], "base64"))).toBe(true); // export equals preview
-      }
-      expect(seen.size).toBe(6);
-      await page.setViewportSize({ width: 1440, height: 1500 });
-      await page.evaluate(() => window.scrollTo(0, 0));
-      await page.waitForTimeout(300);
-      await page.screenshot({ path: path.join(SHOTS, "editor-desktop.png") });
-      await page.setViewportSize({ width: 390, height: 844 });
-      await page.waitForTimeout(300);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
-      await page.screenshot({ path: path.join(SHOTS, "editor-mobile.png"), fullPage: true });
-      void strangers;
-    } finally {
-      await db().event.deleteMany({ where: { id: { in: [owned.id, strangers.id] } } });
-      await cleanup([mine]); // removes the member (and with it the memberships) before the designation they point at
-      await db().designation.deleteMany({ where: { id: second.id } });
-    }
-  });
-
-  test("a missing designation and a very long name, designation-less event or tagline still produce a clean 1080 x 1350 banner", async ({ page, users }) => {
-    test.setTimeout(120_000);
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    const u = await users.create({ fullName: "Short" });
+    const u = await users.create({ fullName: "Amina Rahman Chowdhury" });
     await uiLogin(page, u, "/dashboard/banner");
-    await page.getByLabel(/^Name/).fill("W".repeat(60));
-    await page.getByLabel(/^Tagline/).fill("T".repeat(90));
+    await expect(page.getByRole("heading", { name: "Your ShadowTrix banner" })).toBeVisible();
+
+    // there is nothing to switch between: no template picker at all
+    await expect(page.getByRole("radio")).toHaveCount(0);
+    await expect(page.locator("main").getByText(/template/i)).toHaveCount(0);
+
+    await addPhoto(page);
+    await expect(page.getByText("Drag the preview to reposition the portrait.")).toBeVisible();
     const canvas = page.getByTestId("banner-canvas");
-    await page.waitForTimeout(500);
-    const preview = await canvas.evaluate((c: HTMLCanvasElement) => ({ w: c.width, h: c.height, data: c.toDataURL("image/png") }));
-    expect([preview.w, preview.h]).toEqual([1080, 1350]);
+    const snap = async () => { await settle(page); return canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL("image/png")); };
+
+    // the background text is decoration: typing a role word there never creates a designation
+    const bgText = page.getByLabel(/^Background text/);
+    await expect(bgText).toHaveValue("SHADOW");
+    const initial = await snap();
+    await bgText.fill("FOUNDER");
+    await expect(canvas).toHaveAttribute("aria-label", /background text FOUNDER/);
+    const withFounder = await snap();
+    expect(withFounder).not.toBe(initial);
+    await expect(page.getByLabel(/^Designation/)).toBeDisabled(); // an ordinary person still has no verified designation
+    expect(await page.getByLabel(/^Designation/).locator("option").allTextContents()).toEqual(["None"]);
+    expect(await bgText.getAttribute("maxlength")).toBe("24");
+
+    // every background control changes the picture
+    const seen = new Set([initial, withFounder]);
+    for (const [label, value] of [["Text size", "280"], ["Text position left / right", "0.6"], ["Text position up / down", "-0.7"], ["Text opacity", "0.5"], ["Text rotation", "-14"]] as const) {
+      await page.getByLabel(label, { exact: true }).fill(value);
+      const now = await snap();
+      expect(seen.has(now), `${label} should change the artwork`).toBe(false);
+      seen.add(now);
+    }
+    await page.getByRole("button", { name: "Reset background text" }).click();
+    await expect(bgText).toHaveValue("SHADOW");
+    await expect(page.getByLabel("Text size", { exact: true })).toHaveValue("200");
+    await expect(page.getByLabel("Text rotation", { exact: true })).toHaveValue("0");
+    expect(await samePicture(page, await snap(), initial)).toBe(true); // reset restores the starting artwork
+
+    // optional information appears only when provided and ticked
+    await bgText.fill("PARTICIPANT");
+    const before = await snap();
+    await page.getByLabel(/^University name/).fill("Bangladesh University of Engineering and Technology");
+    await page.getByLabel(/^Department/).fill("Computer Science and Engineering");
+    await page.getByLabel(/^Event name/).fill("ShadowTrix Spring Hackathon 2026");
+    await page.getByLabel(/^Team or organization name/).fill("Team Matrix");
+    await page.getByLabel(/^Tagline/).fill("Enter the Matrix of Innovation.");
+    const filled = await snap();
+    expect(filled).not.toBe(before);
+    fs.writeFileSync(path.join(SHOTS, "banner-1-participant.png"), Buffer.from(filled.split(",")[1], "base64"));
+    for (const [tick, what] of [["Show university", "university"], ["Show department", "department"], ["Show event name", "event"], ["Show team or organization", "team"], ["Show tagline", "tagline"]] as const) {
+      await page.getByLabel(tick, { exact: true }).uncheck();
+      const hidden = await snap();
+      expect(seen.has(hidden), `hiding ${what} should change the artwork`).toBe(false);
+      seen.add(hidden);
+    }
+    expect(await samePicture(page, await snap(), before)).toBe(true); // everything hidden again: the same as having typed nothing
+    for (const tick of ["Show university", "Show department", "Show event name", "Show team or organization", "Show tagline"]) await page.getByLabel(tick, { exact: true }).check();
+    expect(await samePicture(page, await snap(), filled)).toBe(true);
+    await expect(page.getByLabel("Show verified designation", { exact: true })).toBeChecked();
+
+    // two more looks from the same single layout, then the export equals the preview
+    await bgText.fill("TEAM MEMBER");
+    await page.getByLabel("Text rotation", { exact: true }).fill("-8");
+    await page.getByLabel("Text size", { exact: true }).fill("150");
+    await page.getByLabel("Zoom").fill("1.4");
+    const second = await snap();
+    fs.writeFileSync(path.join(SHOTS, "banner-2-team-member.png"), Buffer.from(second.split(",")[1], "base64"));
+    await bgText.fill("JUDGE");
+    await page.getByLabel("Text opacity", { exact: true }).fill("0.4");
+    await page.getByLabel("Text position up / down", { exact: true }).fill("-0.4");
+    await page.getByLabel(/^Name/).fill("Dr. Mohammad Abdul Karim Chowdhury Bhuiyan");
+    const third = await snap();
+    fs.writeFileSync(path.join(SHOTS, "banner-3-judge.png"), Buffer.from(third.split(",")[1], "base64"));
+    expect(new Set([filled, second, third]).size).toBe(3);
+
     const [dl] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /Download PNG/ }).click()]);
     const buf = fs.readFileSync((await dl.path())!);
     expect(pngSize(buf)).toEqual({ w: 1080, h: 1350 });
-    expect(buf.equals(Buffer.from(preview.data.split(",")[1], "base64"))).toBe(true);
-    await page.getByLabel("Zoom").isDisabled(); // no portrait yet: crop controls are inert, not broken
-    await expect(page.getByRole("button", { name: "Reset zoom and position" })).toBeDisabled();
+    await expectExportMatches(page, canvas, third, buf);
+    await page.setViewportSize({ width: 1440, height: 1900 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: path.join(SHOTS, "editor-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+    await page.screenshot({ path: path.join(SHOTS, "editor-mobile.png"), fullPage: true });
+  });
+
+  test("a verified designation stays separate from the background text, and missing information or maximum-length input still exports a clean 1080 x 1350 banner", async ({ page, users }) => {
+    test.setTimeout(120_000);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const u = await users.create({ fullName: "Verified Longtext" });
+    const mine = await member(u.id, { position: "President" });
+    try {
+      await uiLogin(page, u, "/dashboard/banner");
+      await expect(page.getByLabel(/^Designation/)).toBeEnabled();
+      const options = await page.getByLabel(/^Designation/).locator("option").allTextContents();
+      expect(options).toEqual(["None", mine.designation!.title]); // only the approved position; "FOUNDER" typed elsewhere cannot add one
+      await page.getByLabel(/^Background text/).fill("FOUNDER");
+      expect(await page.getByLabel(/^Designation/).locator("option").allTextContents()).toEqual(options);
+      await page.getByLabel(/^Name/).fill("W".repeat(60));
+      await page.getByLabel(/^University name/).fill("U".repeat(80));
+      await page.getByLabel(/^Department/).fill("D".repeat(80));
+      await page.getByLabel(/^Event name/).fill("E".repeat(80));
+      await page.getByLabel(/^Team or organization name/).fill("T".repeat(60));
+      await page.getByLabel(/^Tagline/).fill("G".repeat(90));
+      await page.getByLabel(/^Background text/).fill("W".repeat(24));
+      await page.getByLabel("Text size", { exact: true }).fill("320");
+      await page.getByLabel("Text rotation", { exact: true }).fill("30");
+      const canvas = page.getByTestId("banner-canvas");
+      await settle(page);
+      const preview = await canvas.evaluate((c: HTMLCanvasElement) => ({ w: c.width, h: c.height, data: c.toDataURL("image/png") }));
+      expect([preview.w, preview.h]).toEqual([1080, 1350]);
+      const [dl] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /Download PNG/ }).click()]);
+      const buf = fs.readFileSync((await dl.path())!);
+      expect(pngSize(buf)).toEqual({ w: 1080, h: 1350 });
+      await expectExportMatches(page, canvas, preview.data, buf);
+      await expect(page.getByRole("button", { name: "Reset zoom and position" })).toBeDisabled(); // no portrait yet: crop controls are inert, not broken
+    } finally {
+      await cleanup([mine]);
+    }
   });
 
   for (const vp of [{ name: "mobile", width: 390, height: 844 }, { name: "desktop", width: 1440, height: 900 }]) {
@@ -237,7 +323,7 @@ test.describe("official banner creator", () => {
       const u = await users.create({ fullName: "Mobile Tester" });
       await uiLogin(page, u, "/dashboard/banner");
       await expect(page.getByRole("heading", { name: "Your ShadowTrix banner" })).toBeVisible();
-      await page.locator('input[type="file"]').setInputFiles({ name: "me.jpg", mimeType: "image/jpeg", buffer: await fakePhoto(page) });
+      await addPhoto(page);
       await expect(page.getByText("Drag the preview to reposition the portrait.")).toBeVisible();
       // drag the preview to reposition
       const box = (await page.getByTestId("banner-canvas").boundingBox())!;

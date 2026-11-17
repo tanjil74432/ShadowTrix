@@ -1,13 +1,18 @@
 /**
  * Official ShadowTrix personal banner, drawn with the Canvas 2D API entirely in the browser (no photo ever leaves the device).
- * The same function paints the on-screen preview and the exported PNG, so what you see is what you get: the canvas is always
- * 1080 x 1350 and the preview is only that canvas scaled down with CSS.
+ * ONE universal layout for everybody. The same function paints the on-screen preview and the exported PNG, so what you see is what you
+ * get: the canvas is always 1080 x 1350 and the preview is only that canvas scaled down with CSS.
+ *
+ * The "background text" is decoration chosen freely by the person (FOUNDER, MY TEAM, anything). It is drawn behind the portrait, is never
+ * stored, and has nothing to do with the verified designation, which is a separate, server-approved line in the information panel.
  */
 export const BANNER_W = 1080;
 export const BANNER_H = 1350;
 export const NAME_MAX = 60;
 export const TAGLINE_MAX = 90;
-export const EVENT_MAX = 80;
+export const FIELD_MAX = 80; // university, department, event
+export const TEAM_MAX = 60;
+export const BG_TEXT_MAX = 24;
 export const PORTRAIT_MAX_BYTES = 12 * 1024 * 1024;
 export const PORTRAIT_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 
@@ -19,17 +24,31 @@ export interface Crop {
   y: number;
 }
 
-import { TEMPLATES, type TemplateId, type TemplateSpec } from "./templates";
+export interface BackgroundText {
+  text: string;
+  /** Font size in canvas pixels (60..320). Reduced automatically when the text would not fit. */
+  size: number;
+  /** -1..1 position inside the free area (0 = centred on the top edge of the portrait). */
+  x: number;
+  y: number;
+  /** 0.05..0.6 */
+  opacity: number;
+  /** Degrees, -30..30. */
+  rotation: number;
+}
+
+export const DEFAULT_BACKGROUND: BackgroundText = { text: "SHADOW", size: 200, x: 0, y: 0, opacity: 0.22, rotation: 0 };
 
 export interface BannerInput {
-  template: TemplateId;
   name: string;
+  /** The verified, server-approved designation (never free text). */
   designation?: string;
-  /** An event the person is genuinely linked to (chosen from a server-provided list). */
+  university?: string;
+  department?: string;
   event?: string;
-  /** Organization line printed under the logo. */
-  organization: string;
+  team?: string;
   tagline?: string;
+  background: BackgroundText;
   portrait: CanvasImageSource | null;
   portraitSize: { w: number; h: number } | null;
   crop: Crop;
@@ -38,10 +57,12 @@ export interface BannerInput {
 }
 
 const C = {
-  bg: "#090909", orange: "#f07832", deep: "#d95f1b", soft: "#ff9a55", light: "#ffb27a", fg: "#f5f5f5", silver: "#d4d4d4",
+  bg: "#090909", orange: "#f07832", deep: "#d95f1b", soft: "#ff9a55", light: "#ffb27a", fg: "#f5f5f5", silver: "#d4d4d4", muted: "#a3a3a3",
 };
-export const FRAME = { x: 190, y: 80, w: 810, h: 800 };
-export const PANEL = { x: 190, y: 905, w: 810, h: 385 };
+export const FRAME = { x: 190, y: 230, w: 810, h: 630 };
+export const PANEL = { x: 190, y: 885, w: 810, h: 405 };
+/** Where the background text may sit: the band above the portrait, lining up with it (clear of the vertical wordmark), reaching a little behind its top edge. */
+export const BG_ZONE = { x: 190, y: 10, w: 870, h: 360 };
 
 export const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
@@ -57,25 +78,15 @@ function rng(seed: number) {
   };
 }
 
-const backgroundCache = new Map<string, HTMLCanvasElement | OffscreenCanvas>();
+let backgroundCache: HTMLCanvasElement | OffscreenCanvas | null = null;
 
 function makeCanvas(w: number, h: number): HTMLCanvasElement | OffscreenCanvas {
   return typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(w, h) : Object.assign(document.createElement("canvas"), { width: w, height: h });
 }
 
-/** The words repeated faintly behind everything: brand, role, the person, their event and organization. Same input, same pixels. */
-export function identityWords(input: Pick<BannerInput, "template" | "name" | "event" | "organization">): string[] {
-  const words = ["SHADOWTRIX", TEMPLATES[input.template].badge, input.name.trim().toUpperCase(), input.event?.trim().toUpperCase(), input.organization.trim().toUpperCase()];
-  return words.filter((w): w is string => Boolean(w)).map((w) => (w.length > 28 ? `${w.slice(0, 27)}…` : w));
-}
-
-const hash = (str: string) => { let h = 2166136261; for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619); return h >>> 0; };
-
-/** Black base, ambient light, glyph matrix, identity text, a template motif and network nodes. Cached per template and identity. */
-function background(t: TemplateSpec, words: string[]): CanvasImageSource {
-  const key = `${t.id}|${words.join("|")}`;
-  const hit = backgroundCache.get(key);
-  if (hit) return hit as CanvasImageSource;
+/** Black base, burnt-orange ambient light, faint repeating brand text, a matrix of glyph columns, grid hairlines, halo rings and network nodes. Drawn once and cached. */
+function background(): CanvasImageSource {
+  if (backgroundCache) return backgroundCache as CanvasImageSource;
   const cv = makeCanvas(BANNER_W, BANNER_H);
   const g = cv.getContext("2d") as CanvasRenderingContext2D;
   g.fillStyle = C.bg;
@@ -87,21 +98,20 @@ function background(t: TemplateSpec, words: string[]): CanvasImageSource {
     g.fillStyle = rg;
     g.fillRect(0, 0, BANNER_W, BANNER_H);
   };
-  glow(t.glow.x * BANNER_W, t.glow.y * BANNER_H, 780, 0.4);
-  glow(BANNER_W - t.glow.x * BANNER_W, BANNER_H - t.glow.y * BANNER_H, 520, 0.2);
-  glow(560, 560, 520, 0.1);
+  glow(1000, 1250, 760, 0.42);
+  glow(60, 140, 520, 0.22);
+  glow(600, 330, 560, 0.16);
 
-  // Identity text: faint monospace rows that drift sideways row by row, so the background says who and what this banner is.
+  // Faint rows of brand text, drifting sideways row by row.
   g.save();
   g.font = "700 40px ui-monospace, Menlo, Consolas, monospace";
   g.textBaseline = "top";
-  const chain = words.join("   //   ") + "   //   ";
+  const chain = "SHADOWTRIX   //   ENTER THE MATRIX   //   TEAM EU SHADOW   //   ";
   const unit = g.measureText(chain).width || 1;
-  const reps = Math.ceil((BANNER_W + unit) / unit) + 1;
-  const row = chain.repeat(reps);
+  const row = chain.repeat(Math.ceil((BANNER_W + unit) / unit) + 1);
   for (let i = 0, y = 14; y < BANNER_H; i++, y += 78) {
-    g.fillStyle = i % 5 === 0 ? "rgba(255,154,85,0.085)" : "rgba(240,120,50,0.045)";
-    g.fillText(row, -((i * 173 + hash(key) % 97) % unit), y);
+    g.fillStyle = i % 5 === 0 ? "rgba(255,154,85,0.07)" : "rgba(240,120,50,0.035)";
+    g.fillText(row, -((i * 173) % unit), y);
   }
   g.restore();
 
@@ -122,34 +132,33 @@ function background(t: TemplateSpec, words: string[]): CanvasImageSource {
       g.fillText(glyphs[Math.floor(r() * glyphs.length)], x, y);
     }
   }
-  // Irregular grid: long hairlines at uneven spacing. The organizer template makes it stronger.
-  g.strokeStyle = t.motif === "grid" ? "rgba(240,120,50,0.14)" : "rgba(240,120,50,0.07)";
+  // Irregular grid: long hairlines at uneven spacing, not a repeating tile.
+  g.strokeStyle = "rgba(240,120,50,0.09)";
   g.lineWidth = 1;
   let gx = 0;
   while (gx < BANNER_W) { gx += 60 + r() * 150; g.beginPath(); g.moveTo(gx, 0); g.lineTo(gx, BANNER_H); g.stroke(); }
   let gy = 0;
   while (gy < BANNER_H) { gy += 70 + r() * 170; g.beginPath(); g.moveTo(0, gy); g.lineTo(BANNER_W, gy); g.stroke(); }
-  // Network nodes and links (denser for the team template).
-  const count = t.motif === "network" ? 40 : 22;
-  const nodes = Array.from({ length: count }, () => ({ x: r() * BANNER_W, y: r() * BANNER_H }));
+  // Geometric halo rings behind the portrait.
+  g.strokeStyle = "rgba(255,154,85,0.2)";
+  g.lineWidth = 2;
+  for (const rad of [380, 470, 560]) { g.beginPath(); g.arc(BANNER_W * 0.6, 520, rad, 0, Math.PI * 2); g.stroke(); }
+  // Network nodes and links.
+  const nodes = Array.from({ length: 28 }, () => ({ x: r() * BANNER_W, y: r() * BANNER_H }));
   g.strokeStyle = "rgba(240,120,50,0.2)";
+  g.lineWidth = 1;
   for (let i = 0; i < nodes.length; i++) {
     const near = nodes.map((n, j) => ({ j, d: Math.hypot(n.x - nodes[i].x, n.y - nodes[i].y) })).filter((o) => o.j > i && o.d < 280).slice(0, 2);
     for (const o of near) { g.beginPath(); g.moveTo(nodes[i].x, nodes[i].y); g.lineTo(nodes[o.j].x, nodes[o.j].y); g.stroke(); }
   }
   nodes.forEach((n, i) => { g.fillStyle = i % 4 === 0 ? "rgba(255,154,85,0.85)" : "rgba(240,120,50,0.45)"; g.beginPath(); g.arc(n.x, n.y, i % 4 === 0 ? 4 : 2.5, 0, Math.PI * 2); g.fill(); });
-  // Template motifs.
-  if (t.motif === "scan") { g.fillStyle = "rgba(255,154,85,0.05)"; for (let y = 0; y < BANNER_H; y += 6) g.fillRect(0, y, BANNER_W, 2); }
-  if (t.motif === "diagonal") { g.strokeStyle = "rgba(255,154,85,0.12)"; g.lineWidth = 2; for (let x = -BANNER_H; x < BANNER_W; x += 90) { g.beginPath(); g.moveTo(x, BANNER_H); g.lineTo(x + BANNER_H, 0); g.stroke(); } }
-  if (t.motif === "halo") { g.strokeStyle = "rgba(255,154,85,0.22)"; g.lineWidth = 2; for (const rad of [380, 470, 560]) { g.beginPath(); g.arc(BANNER_W * 0.6, 470, rad, 0, Math.PI * 2); g.stroke(); } }
   // Darken the vignette so the portrait and text stay dominant.
   const v = g.createRadialGradient(BANNER_W / 2, BANNER_H / 2, 300, BANNER_W / 2, BANNER_H / 2, 950);
   v.addColorStop(0, "rgba(9,9,9,0.35)");
   v.addColorStop(1, "rgba(9,9,9,0)");
   g.fillStyle = v;
   g.fillRect(0, 0, BANNER_W, BANNER_H);
-  if (backgroundCache.size >= 4) backgroundCache.delete(backgroundCache.keys().next().value as string);
-  backgroundCache.set(key, cv);
+  backgroundCache = cv;
   return cv as CanvasImageSource;
 }
 
@@ -194,95 +203,168 @@ export function fitText(g: CanvasRenderingContext2D, text: string, maxW: number,
   if (lines.length <= maxLines) return { px: min, lines };
   const out = lines.slice(0, maxLines);
   let last = out[maxLines - 1];
-  while (last.length > 1 && g.measureText(`${last}\u2026`).width > maxW) last = last.slice(0, -1);
-  out[maxLines - 1] = `${last}\u2026`;
+  while (last.length > 1 && g.measureText(`${last}…`).width > maxW) last = last.slice(0, -1);
+  out[maxLines - 1] = `${last}…`;
   return { px: min, lines: out };
 }
 
+// ───────────────────────────── Background text ─────────────────────────────
+
+export interface BackgroundPlan {
+  text: string;
+  size: number;
+  /** Centre of the text box and its rotation. */
+  cx: number;
+  cy: number;
+  rotation: number;
+  opacity: number;
+  /** Axis-aligned box that contains the (rotated) text; always inside BG_ZONE. */
+  box: { x: number; y: number; w: number; h: number };
+}
+
+/**
+ * Places the background text. The size is reduced until the rotated text fits the zone, and the position is limited so the box never leaves
+ * the zone, so the text can never be clipped by the edge of the banner. Pure given a measuring context (unit-tested).
+ */
+export function planBackgroundText(g: CanvasRenderingContext2D, bg: BackgroundText, ff: string): BackgroundPlan | null {
+  const text = bg.text.replace(/\s+/g, " ").trim().toUpperCase().slice(0, BG_TEXT_MAX);
+  if (!text) return null;
+  const rotation = clamp(Number.isFinite(bg.rotation) ? bg.rotation : 0, -30, 30);
+  const rad = (rotation * Math.PI) / 180;
+  let size = clamp(Number.isFinite(bg.size) ? bg.size : DEFAULT_BACKGROUND.size, 60, 320);
+  let w = 0, h = 0, bw = 0, bh = 0;
+  for (;;) {
+    g.font = `800 ${size}px ${ff}`;
+    w = g.measureText(text).width;
+    h = size * 0.82; // cap height of the capitals that are drawn
+    bw = Math.abs(w * Math.cos(rad)) + Math.abs(h * Math.sin(rad));
+    bh = Math.abs(w * Math.sin(rad)) + Math.abs(h * Math.cos(rad));
+    if ((bw <= BG_ZONE.w && bh <= BG_ZONE.h) || size <= 24) break;
+    size = Math.max(24, Math.floor(size * 0.95));
+  }
+  const px = clamp(Number.isFinite(bg.x) ? bg.x : 0, -1, 1);
+  const py = clamp(Number.isFinite(bg.y) ? bg.y : 0, -1, 1);
+  const midX = BG_ZONE.x + BG_ZONE.w / 2;
+  const midY = BG_ZONE.y + BG_ZONE.h / 2;
+  const cx = midX + (px * Math.max(0, BG_ZONE.w - bw)) / 2;
+  const cy = midY + (py * Math.max(0, BG_ZONE.h - bh)) / 2;
+  return { text, size, cx, cy, rotation, opacity: clamp(Number.isFinite(bg.opacity) ? bg.opacity : DEFAULT_BACKGROUND.opacity, 0.05, 0.6), box: { x: cx - bw / 2, y: cy - bh / 2, w: bw, h: bh } };
+}
+
+function drawBackgroundText(g: CanvasRenderingContext2D, plan: BackgroundPlan, ff: string) {
+  g.save();
+  g.translate(plan.cx, plan.cy);
+  g.rotate((plan.rotation * Math.PI) / 180);
+  g.textAlign = "center";
+  g.textBaseline = "alphabetic";
+  g.font = `800 ${plan.size}px ${ff}`;
+  g.lineJoin = "round";
+  g.fillStyle = `rgba(245,245,245,${plan.opacity})`;
+  g.strokeStyle = `rgba(240,120,50,${clamp(plan.opacity * 1.8, 0.1, 0.9)})`;
+  g.lineWidth = 2;
+  const baseline = (plan.size * 0.82) / 2; // vertically centre the capitals on (cx, cy)
+  g.fillText(plan.text, 0, baseline);
+  g.strokeText(plan.text, 0, baseline);
+  g.restore();
+}
+
+// ───────────────────────────── Information panel ─────────────────────────────
+
+export interface PanelRow {
+  key: "designation" | "university" | "department" | "event" | "team" | "tagline";
+  px: number;
+  font: string;
+  lines: string[];
+  baseline: number;
+  color: string;
+  /** The width this row was fitted to. */
+  maxW: number;
+}
+
 export interface PanelPlan {
-  name: { px: number; lines: string[]; baseline: number };
+  name: { px: number; font: string; lines: string[]; baseline: number; maxW: number };
   bar: number;
-  designation: { px: number; lines: string[]; baseline: number } | null;
-  event: { px: number; lines: string[]; baseline: number } | null;
-  tagline: { px: number; lines: string[]; baseline: number } | null;
-  /** Lowest y used by the top-down content and highest y used by the tagline; the first must stay above the second. */
-  contentBottom: number;
-  taglineTop: number;
+  rows: PanelRow[];
+  /** Lowest y used by any text; must stay inside the panel. */
+  bottom: number;
+  brand: ReturnType<typeof brandZones>;
 }
 
 const PAD = 36;
 const LOGO = 120;
+const BOTTOM_PAD = 24;
+export const TEXT_X = PANEL.x + 40;
+const CAPTION = "TEAM EU SHADOW";
+const captionFont = (ff: string) => `600 18px ${ff}`;
+/** The top-right corner of the panel belongs to the official logo and the brand caption under it; text keeps clear of both. */
+export function brandZones(captionWidth: number) {
+  const right = PANEL.x + PANEL.w - 40;
+  return {
+    logo: { x: right - LOGO, y: PANEL.y + PAD, w: LOGO, h: LOGO },
+    caption: { x: right - captionWidth, y: PANEL.y + PAD + LOGO + 30 - 18, w: captionWidth, h: 24 },
+  };
+}
+const LOGO_BOTTOM = PANEL.y + PAD + LOGO + 40;
 
-/** Decides where every text block of the information panel goes. Pure given a measuring context, so tests can check that nothing overlaps. */
-export function planPanel(g: CanvasRenderingContext2D, input: Pick<BannerInput, "name" | "designation" | "event" | "tagline">, ff: string): PanelPlan {
+/**
+ * Decides where every text block of the information panel goes. Rows only exist when they have text (the person chooses what to show).
+ * If everything does not fit, the secondary rows shrink together, then fall back to one line each, so nothing overlaps or leaves the panel.
+ * Pure given a measuring context, so tests can check it with worst-case input.
+ */
+export function planPanel(g: CanvasRenderingContext2D, input: Pick<BannerInput, "name" | "designation" | "university" | "department" | "event" | "team" | "tagline">, ff: string): PanelPlan {
   const innerW = PANEL.w - 2 * 40;
-  const nameW = innerW - LOGO - 30; // the logo sits at the top right
-  const name = fitText(g, input.name.trim() || "Your name", nameW, 2, 64, 34, (px) => `800 ${px}px ${ff}`);
-  let y = PANEL.y + PAD + name.px * 0.85;
-  const nameBase = y;
-  y += (name.lines.length - 1) * name.px * 1.05;
-  const bar = y + 16;
-  y = bar + 5 + 18;
-  const des = input.designation?.trim();
-  let designation: PanelPlan["designation"] = null;
-  if (des) {
-    const d = fitText(g, des, nameW, 1, 34, 20, (px) => `700 ${px}px ${ff}`);
-    y += d.px * 0.85;
-    designation = { px: d.px, lines: d.lines, baseline: y };
-    y += d.px * 0.3 + 14;
+  g.font = captionFont(ff);
+  const brand = brandZones(g.measureText(CAPTION).width);
+  const nameW = innerW - Math.max(LOGO, brand.caption.w) - 30; // the logo and its caption sit at the top right
+  const nameFont = (px: number) => `800 ${px}px ${ff}`;
+  const name = fitText(g, input.name.trim() || "Your name", nameW, 2, 64, 34, nameFont);
+  const nameBase = PANEL.y + PAD + name.px * 0.85;
+  const bar = nameBase + (name.lines.length - 1) * name.px * 1.05 + 16;
+  const top = bar + 5 + 18;
+  const limit = PANEL.y + PANEL.h - BOTTOM_PAD;
+
+  const spec = [
+    { key: "designation" as const, text: input.designation?.trim() ?? "", maxLines: 1, start: 34, min: 20, weight: 700, color: C.soft },
+    { key: "university" as const, text: input.university?.trim() ?? "", maxLines: 2, start: 30, min: 18, weight: 700, color: C.fg },
+    { key: "department" as const, text: input.department?.trim() ?? "", maxLines: 1, start: 26, min: 18, weight: 600, color: C.silver },
+    { key: "event" as const, text: input.event?.trim() ?? "", maxLines: 2, start: 26, min: 18, weight: 600, color: C.silver },
+    { key: "team" as const, text: input.team?.trim() ?? "", maxLines: 1, start: 26, min: 18, weight: 600, color: C.silver },
+    { key: "tagline" as const, text: input.tagline?.trim() ?? "", maxLines: 2, start: 24, min: 16, weight: 500, color: C.muted },
+  ].filter((r) => r.text);
+
+  const attempt = (scale: number, oneLine: boolean) => {
+    let y = top;
+    const rows: PanelRow[] = [];
+    for (const r of spec) {
+      const maxW = y < LOGO_BOTTOM ? nameW : innerW;
+      const font = (px: number) => `${r.weight} ${px}px ${ff}`;
+      const f = fitText(g, r.text, maxW, oneLine ? 1 : r.maxLines, Math.round((r.start * scale) / 2) * 2, Math.max(14, Math.round((r.min * scale) / 2) * 2), font);
+      y += f.px * 0.85;
+      rows.push({ key: r.key, px: f.px, font: font(f.px), lines: f.lines, baseline: y, color: r.color, maxW });
+      y += (f.lines.length - 1) * f.px * 1.2 + f.px * 0.3 + 10;
+    }
+    return { rows, bottom: y - 10 };
+  };
+  let chosen = attempt(1, false);
+  for (const s of [0.92, 0.84, 0.76, 0.68, 0.6]) {
+    if (chosen.bottom <= limit) break;
+    chosen = attempt(s, false);
   }
-  const ev = input.event?.trim();
-  let event: PanelPlan["event"] = null;
-  if (ev) {
-    const e = fitText(g, ev, innerW - 250, 2, 28, 20, (px) => `600 ${px}px ${ff}`);
-    y += e.px * 0.85;
-    event = { px: e.px, lines: e.lines, baseline: y };
-    y += (e.lines.length - 1) * e.px * 1.2 + e.px * 0.3 + 10;
-  }
-  const contentBottom = y;
-  const tag = input.tagline?.trim();
-  let tagline: PanelPlan["tagline"] = null;
-  let taglineTop = PANEL.y + PANEL.h;
-  if (tag) {
-    const t = fitText(g, tag, innerW, 2, 26, 18, (px) => `500 ${px}px ${ff}`);
-    const first = PANEL.y + PANEL.h - 26 - (t.lines.length - 1) * t.px * 1.25;
-    tagline = { px: t.px, lines: t.lines, baseline: first };
-    taglineTop = first - t.px * 0.9;
-  }
-  return { name: { px: name.px, lines: name.lines, baseline: nameBase }, bar, designation, event, tagline, contentBottom, taglineTop };
+  if (chosen.bottom > limit) chosen = attempt(0.6, true);
+  return { name: { px: name.px, font: nameFont(name.px), lines: name.lines, baseline: nameBase, maxW: nameW }, bar, rows: chosen.rows, bottom: Math.max(chosen.bottom, bar + 5), brand };
 }
 
-function drawFrame(g: CanvasRenderingContext2D, t: TemplateSpec) {
-  const { x, y, w, h } = FRAME;
-  g.strokeStyle = "rgba(240,120,50,0.85)";
-  g.lineWidth = 3;
-  if (t.frame === "brackets") {
-    const L = 70;
-    g.lineWidth = 7;
-    g.strokeStyle = t.accentSoft;
-    for (const [cx, cy, dx, dy] of [[x, y, 1, 1], [x + w, y, -1, 1], [x, y + h, 1, -1], [x + w, y + h, -1, -1]] as const) {
-      g.beginPath(); g.moveTo(cx + dx * L, cy); g.lineTo(cx, cy); g.lineTo(cx, cy + dy * L); g.stroke();
-    }
-    g.lineWidth = 2; g.strokeStyle = "rgba(240,120,50,0.5)"; g.strokeRect(x, y, w, h);
-  } else if (t.frame === "double") {
-    g.strokeRect(x, y, w, h);
-    g.lineWidth = 1.5; g.strokeStyle = t.accentSoft;
-    g.strokeRect(x + 14, y + 14, w - 28, h - 28);
-  } else if (t.frame === "notch") {
-    g.strokeRect(x, y, w, h);
-    g.fillStyle = t.accent;
-    g.beginPath(); g.moveTo(x + w - 90, y); g.lineTo(x + w, y); g.lineTo(x + w, y + 90); g.closePath(); g.fill();
-  } else {
-    g.strokeRect(x, y, w, h);
-  }
-}
+// ───────────────────────────── Drawing ─────────────────────────────
 
 export function drawBanner(g: CanvasRenderingContext2D, input: BannerInput) {
   const { fontFamily: ff } = input;
-  const t = TEMPLATES[input.template] ?? TEMPLATES.participant;
   g.save();
   g.clearRect(0, 0, BANNER_W, BANNER_H);
-  g.drawImage(background(t, identityWords(input)), 0, 0);
+  g.drawImage(background(), 0, 0);
+
+  // Customisable background text, behind the portrait and the information panel.
+  const bgPlan = planBackgroundText(g, input.background, ff);
+  if (bgPlan) drawBackgroundText(g, bgPlan, ff);
 
   // Vertical wordmark on the left.
   g.save();
@@ -329,28 +411,20 @@ export function drawBanner(g: CanvasRenderingContext2D, input: BannerInput) {
     ph.addColorStop(0, "#2b1a10"); ph.addColorStop(1, "#141414");
     g.fillStyle = ph; g.fillRect(FRAME.x, FRAME.y, FRAME.w, FRAME.h);
     g.fillStyle = "rgba(240,120,50,0.55)";
-    g.beginPath(); g.arc(FRAME.x + FRAME.w / 2, FRAME.y + 320, 120, 0, Math.PI * 2); g.fill();
-    g.beginPath(); g.ellipse(FRAME.x + FRAME.w / 2, FRAME.y + 680, 260, 250, 0, Math.PI, 0); g.fill();
+    g.beginPath(); g.arc(FRAME.x + FRAME.w / 2, FRAME.y + 230, 105, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(FRAME.x + FRAME.w / 2, FRAME.y + 580, 240, 230, 0, Math.PI, 0); g.fill();
     g.fillStyle = C.silver; g.textAlign = "center"; g.textBaseline = "alphabetic"; g.font = `600 30px ${ff}`;
     g.fillText("Upload a portrait", FRAME.x + FRAME.w / 2, FRAME.y + FRAME.h - 40);
   }
-  const fade = g.createLinearGradient(0, FRAME.y + FRAME.h - 220, 0, FRAME.y + FRAME.h);
+  const fade = g.createLinearGradient(0, FRAME.y + FRAME.h - 200, 0, FRAME.y + FRAME.h);
   fade.addColorStop(0, "rgba(9,9,9,0)"); fade.addColorStop(1, "rgba(9,9,9,0.85)");
-  g.fillStyle = fade; g.fillRect(FRAME.x, FRAME.y + FRAME.h - 220, FRAME.w, 220);
+  g.fillStyle = fade; g.fillRect(FRAME.x, FRAME.y + FRAME.h - 200, FRAME.w, 200);
   g.restore();
-  drawFrame(g, t);
-
-  // Role badge on the portrait.
-  g.save();
-  g.font = `800 28px ${ff}`;
-  g.textBaseline = "alphabetic";
-  g.textAlign = "left";
-  const label = t.badge.split("").join(String.fromCharCode(0x200a));
-  const bw = g.measureText(label).width + 44, bh = 54, bx = FRAME.x + 30, by = FRAME.y + 30;
-  if (t.badgeFilled) { g.fillStyle = t.accent; g.fillRect(bx, by, bw, bh); } else { g.fillStyle = "rgba(9,9,9,0.7)"; g.fillRect(bx, by, bw, bh); g.strokeStyle = t.accentSoft; g.lineWidth = 2; g.strokeRect(bx, by, bw, bh); }
-  g.fillStyle = t.badgeFilled ? "#f5f5f5" : t.accentSoft;
-  g.fillText(label, bx + 22, by + 37);
-  g.restore();
+  // Double frame.
+  g.strokeStyle = "rgba(240,120,50,0.85)"; g.lineWidth = 3;
+  g.strokeRect(FRAME.x, FRAME.y, FRAME.w, FRAME.h);
+  g.strokeStyle = C.soft; g.lineWidth = 1.5;
+  g.strokeRect(FRAME.x + 14, FRAME.y + 14, FRAME.w - 28, FRAME.h - 28);
 
   // Information panel: dark orange glass.
   g.save();
@@ -363,29 +437,27 @@ export function drawBanner(g: CanvasRenderingContext2D, input: BannerInput) {
   g.strokeRect(PANEL.x, PANEL.y, PANEL.w, PANEL.h);
 
   const plan = planPanel(g, input, ff);
-  const tx = PANEL.x + 40;
+  const tx = TEXT_X;
   g.textAlign = "left"; g.textBaseline = "alphabetic";
   g.fillStyle = C.fg;
-  plan.name.lines.forEach((line, i) => { g.font = `800 ${plan.name.px}px ${ff}`; g.fillText(line, tx, plan.name.baseline + i * plan.name.px * 1.05); });
+  g.font = plan.name.font;
+  plan.name.lines.forEach((line, i) => g.fillText(line, tx, plan.name.baseline + i * plan.name.px * 1.05));
   const lineGrad = g.createLinearGradient(tx, 0, tx + 120, 0);
-  lineGrad.addColorStop(0, t.accent); lineGrad.addColorStop(1, t.accentSoft);
+  lineGrad.addColorStop(0, C.orange); lineGrad.addColorStop(1, C.soft);
   g.fillStyle = lineGrad; g.fillRect(tx, plan.bar, 120, 5);
-  if (plan.designation) { g.fillStyle = C.soft; g.font = `700 ${plan.designation.px}px ${ff}`; g.fillText(plan.designation.lines[0], tx, plan.designation.baseline); }
-  if (plan.event) { const ev = plan.event; g.font = `600 ${ev.px}px ${ff}`; g.fillStyle = C.silver; ev.lines.forEach((line, i) => g.fillText(line, tx, ev.baseline + i * ev.px * 1.2)); }
-  if (plan.tagline) {
-    const tg = plan.tagline;
-    g.fillStyle = C.silver;
-    tg.lines.forEach((line, i) => { g.font = `500 ${tg.px}px ${ff}`; g.fillText(line, tx, tg.baseline + i * tg.px * 1.25); });
+  for (const row of plan.rows) {
+    g.font = row.font;
+    g.fillStyle = row.color;
+    row.lines.forEach((line, i) => g.fillText(line, tx, row.baseline + i * row.px * 1.2));
   }
-  // Logo (the unchanged official mark) with a soft orange glow, and the organization under it.
+  // Logo (the unchanged official mark) with a soft orange glow, and the brand caption under it.
   if (input.logo) {
     g.save();
     g.shadowColor = "rgba(240,120,50,0.6)"; g.shadowBlur = 24;
     g.drawImage(input.logo, PANEL.x + PANEL.w - 40 - LOGO, PANEL.y + PAD, LOGO, LOGO);
     g.restore();
   }
-  const org = fitText(g, input.organization.trim().toUpperCase(), 230, 1, 22, 14, (px) => `600 ${px}px ${ff}`);
-  g.fillStyle = "rgba(255,154,85,0.85)"; g.font = `600 ${org.px}px ${ff}`; g.textAlign = "right";
-  g.fillText(org.lines[0], PANEL.x + PANEL.w - 40, PANEL.y + PAD + LOGO + 30);
+  g.fillStyle = "rgba(255,154,85,0.85)"; g.font = captionFont(ff); g.textAlign = "right";
+  g.fillText(CAPTION, PANEL.x + PANEL.w - 40, PANEL.y + PAD + LOGO + 30);
   g.restore();
 }

@@ -3,21 +3,29 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
-import { drawBanner, BANNER_H, BANNER_W, FRAME, NAME_MAX, PORTRAIT_MAX_BYTES, PORTRAIT_TYPES, TAGLINE_MAX, clamp, type Crop } from "@/lib/banner/render";
-import { TEMPLATES, type TemplateId } from "@/lib/banner/templates";
+import {
+  BANNER_H, BANNER_W, BG_TEXT_MAX, DEFAULT_BACKGROUND, FIELD_MAX, FRAME, NAME_MAX, PORTRAIT_MAX_BYTES, PORTRAIT_TYPES, TAGLINE_MAX, TEAM_MAX,
+  clamp, drawBanner, type BackgroundText, type Crop,
+} from "@/lib/banner/render";
 import { site } from "@/lib/site";
 
 export interface BannerSubjectProps {
   fullName: string;
   designations: { id: string; label: string }[];
-  /** Templates this person may use (decided on the server from real records). Never empty: participant is always allowed. */
-  templates: TemplateId[];
-  /** Events this person is genuinely linked to. */
-  events: { id: string; title: string }[];
 }
 
 const MAX_EDGE = 2400; // portraits are downscaled on load so phones are not asked to repaint a 40-megapixel photo
 const START: Crop = { zoom: 1, x: 0, y: 0 };
+
+type OptionalKey = "designation" | "university" | "department" | "event" | "team" | "tagline";
+const SHOW_LABELS: Record<OptionalKey, string> = {
+  designation: "Verified designation",
+  university: "University",
+  department: "Department",
+  event: "Event name",
+  team: "Team or organization",
+  tagline: "Tagline",
+};
 
 async function loadPortrait(file: File): Promise<{ img: ImageBitmap | HTMLImageElement; w: number; h: number }> {
   if (typeof createImageBitmap === "function") {
@@ -54,10 +62,13 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
   const raf = useRef(0);
   const [name, setName] = useState(subject.fullName.slice(0, NAME_MAX));
   const [designationId, setDesignationId] = useState(subject.designations[0]?.id ?? "");
+  const [university, setUniversity] = useState("");
+  const [department, setDepartment] = useState("");
+  const [event, setEvent] = useState("");
+  const [team, setTeam] = useState("");
   const [tagline, setTagline] = useState("");
-  const allowed = subject.templates.length ? subject.templates : (["participant"] as TemplateId[]);
-  const [template, setTemplate] = useState<TemplateId>(allowed[0]);
-  const [eventId, setEventId] = useState("");
+  const [show, setShow] = useState<Record<OptionalKey, boolean>>({ designation: true, university: true, department: true, event: true, team: true, tagline: true });
+  const [bg, setBg] = useState<BackgroundText>(DEFAULT_BACKGROUND);
   const [crop, setCrop] = useState<Crop>(START);
   const [hasPortrait, setHasPortrait] = useState(false);
   const [version, setVersion] = useState(0); // bumps when an asset (portrait, logo, fonts) becomes ready
@@ -65,7 +76,7 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
   const [status, setStatus] = useState("");
 
   const designation = subject.designations.find((d) => d.id === designationId)?.label;
-  const event = subject.events.find((e) => e.id === eventId)?.title;
+  const shown = (key: OptionalKey, value: string | undefined) => (show[key] && value?.trim() ? value : undefined);
 
   const paint = useCallback(() => {
     const cv = canvasRef.current;
@@ -73,12 +84,21 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
     if (!cv || !g) return;
     const p = portraitRef.current;
     drawBanner(g, {
-      template, name, designation, event, organization: site.operator, tagline, crop,
+      name,
+      designation: shown("designation", designation),
+      university: shown("university", university),
+      department: shown("department", department),
+      event: shown("event", event),
+      team: shown("team", team),
+      tagline: shown("tagline", tagline),
+      background: bg,
+      crop,
       portrait: p?.img ?? null, portraitSize: p ? { w: p.w, h: p.h } : null,
       logo: logoRef.current?.complete && logoRef.current.naturalWidth ? logoRef.current : null,
       fontFamily: typeof document === "undefined" ? "sans-serif" : getComputedStyle(document.body).fontFamily || "sans-serif",
     });
-  }, [template, name, designation, event, tagline, crop]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `shown` only reads `show`, which is listed
+  }, [name, designation, university, department, event, team, tagline, show, bg, crop]);
 
   useEffect(() => {
     cancelAnimationFrame(raf.current);
@@ -91,7 +111,15 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
     img.onload = () => setVersion((v) => v + 1);
     img.src = site.logo.src;
     logoRef.current = img;
-    void document.fonts?.ready.then(() => setVersion((v) => v + 1));
+    // The canvas draws with the page font in four weights. Ask for each explicitly and repaint whenever any finishes loading, so the preview
+    // never stays on a fallback font while the exported PNG (painted after the fonts are ready) uses the real one.
+    const bump = () => setVersion((v) => v + 1);
+    const family = getComputedStyle(document.body).fontFamily || "sans-serif";
+    document.fonts?.addEventListener("loadingdone", bump);
+    void Promise.all([500, 600, 700, 800].map((w) => document.fonts?.load(`${w} 24px ${family}`).catch(() => [])))
+      .then(() => document.fonts?.ready)
+      .then(bump);
+    return () => document.fonts?.removeEventListener("loadingdone", bump);
   }, []);
 
   async function onFile(file: File | undefined) {
@@ -157,21 +185,17 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
   }
 
   const slider = "w-full accent-[var(--color-accent)] disabled:opacity-40";
+  const setBgField = <K extends keyof BackgroundText>(key: K, value: BackgroundText[K]) => setBg((b) => ({ ...b, [key]: value }));
+  const toggle = (key: OptionalKey) => (
+    <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" checked={show[key]} onChange={(e) => setShow((s) => ({ ...s, [key]: e.target.checked }))} className="size-4 accent-[var(--color-accent)]" />
+      Show {SHOW_LABELS[key].toLowerCase()}
+    </label>
+  );
+
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:items-start">
-      <div className="space-y-5 order-2 lg:order-1">
-        <fieldset className="space-y-2 rounded-lg border border-border p-4">
-          <legend className="px-1 text-sm font-medium">Template</legend>
-          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Banner template">
-            {allowed.map((id) => (
-              <label key={id} className={`cursor-pointer rounded-md border px-3 py-2 text-sm has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--color-accent)] ${template === id ? "border-[var(--color-accent)] bg-surface-2 font-semibold" : "border-border"}`}>
-                <input type="radio" name="banner-template" value={id} checked={template === id} onChange={() => setTemplate(id)} className="sr-only" />
-                {TEMPLATES[id].label}
-              </label>
-            ))}
-          </div>
-          <p className="text-xs text-fg-muted">{allowed.length > 1 ? "Only templates that match your role on ShadowTrix are offered." : "Role templates appear here once your role on ShadowTrix is on record."}</p>
-        </fieldset>
+      <div className="order-2 space-y-5 lg:order-1">
         <Field label="Portrait" hint="JPEG, PNG or WebP, up to 12 MB. The photo stays in your browser and is never uploaded.">
           {(c) => (
             <input
@@ -196,12 +220,43 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
           </label>
           <Button type="button" variant="secondary" size="sm" onClick={() => setCrop(START)}>Reset zoom and position</Button>
         </fieldset>
+
+        <fieldset className="space-y-3 rounded-lg border border-border p-4">
+          <legend className="px-1 text-sm font-medium">Background text</legend>
+          <Field label="Background text" hint="Large, soft lettering behind your photo, for example FOUNDER, MY TEAM or anything you like. It is decoration only: not a verified role, and it gives no access.">
+            {(c) => <Input {...c} value={bg.text} maxLength={BG_TEXT_MAX} onChange={(e) => setBgField("text", e.target.value)} autoComplete="off" />}
+          </Field>
+          <label className="block text-sm">Text size
+            <input type="range" min={60} max={320} step={2} value={bg.size} onChange={(e) => setBgField("size", Number(e.target.value))} className={slider} />
+          </label>
+          <label className="block text-sm">Text position left / right
+            <input type="range" min={-1} max={1} step={0.01} value={bg.x} onChange={(e) => setBgField("x", Number(e.target.value))} className={slider} />
+          </label>
+          <label className="block text-sm">Text position up / down
+            <input type="range" min={-1} max={1} step={0.01} value={bg.y} onChange={(e) => setBgField("y", Number(e.target.value))} className={slider} />
+          </label>
+          <label className="block text-sm">Text opacity
+            <input type="range" min={0.05} max={0.6} step={0.01} value={bg.opacity} onChange={(e) => setBgField("opacity", Number(e.target.value))} className={slider} />
+          </label>
+          <label className="block text-sm">Text rotation
+            <input type="range" min={-30} max={30} step={1} value={bg.rotation} onChange={(e) => setBgField("rotation", Number(e.target.value))} className={slider} />
+          </label>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setBg(DEFAULT_BACKGROUND)}>Reset background text</Button>
+        </fieldset>
+
         <Field label="Name" required>
           {(c) => <Input {...c} value={name} maxLength={NAME_MAX} onChange={(e) => setName(e.target.value)} autoComplete="name" />}
         </Field>
+        <fieldset className="space-y-2 rounded-lg border border-border p-4">
+          <legend className="px-1 text-sm font-medium">Show on banner</legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {(Object.keys(SHOW_LABELS) as OptionalKey[]).map((k) => <div key={k}>{toggle(k)}</div>)}
+          </div>
+          <p className="text-xs text-fg-muted">Untick anything you prefer to leave off. Your name is always shown.</p>
+        </fieldset>
         <Field
           label="Designation"
-          hint={subject.designations.length ? "Only designations approved for this person are offered." : "No approved designation is on record, so the banner shows the name only."}
+          hint={subject.designations.length ? "Verified designation: only designations approved for this person are offered." : "No approved designation is on record, so the banner shows no designation."}
         >
           {(c) => (
             <Select {...c} value={designationId} onChange={(e) => setDesignationId(e.target.value)} disabled={subject.designations.length === 0}>
@@ -210,16 +265,20 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
             </Select>
           )}
         </Field>
-        <Field label="Event" hint={subject.events.length ? "Only events you take part in are offered." : "No event is linked to your account yet."}>
-          {(c) => (
-            <Select {...c} value={eventId} onChange={(e) => setEventId(e.target.value)} disabled={subject.events.length === 0}>
-              <option value="">None</option>
-              {subject.events.map((e) => <option key={e.id} value={e.id}>{e.title}</option>)}
-            </Select>
-          )}
+        <Field label="University name">
+          {(c) => <Input {...c} value={university} maxLength={FIELD_MAX} onChange={(e) => setUniversity(e.target.value)} autoComplete="organization" />}
+        </Field>
+        <Field label="Department">
+          {(c) => <Input {...c} value={department} maxLength={FIELD_MAX} onChange={(e) => setDepartment(e.target.value)} autoComplete="off" />}
+        </Field>
+        <Field label="Event name">
+          {(c) => <Input {...c} value={event} maxLength={FIELD_MAX} onChange={(e) => setEvent(e.target.value)} autoComplete="off" />}
+        </Field>
+        <Field label="Team or organization name">
+          {(c) => <Input {...c} value={team} maxLength={TEAM_MAX} onChange={(e) => setTeam(e.target.value)} autoComplete="off" />}
         </Field>
         <Field label="Tagline" hint={`Up to ${TAGLINE_MAX} characters.`}>
-          {(c) => <Input {...c} value={tagline} maxLength={TAGLINE_MAX} onChange={(e) => setTagline(e.target.value)} />}
+          {(c) => <Input {...c} value={tagline} maxLength={TAGLINE_MAX} onChange={(e) => setTagline(e.target.value)} autoComplete="off" />}
         </Field>
         <div className="flex flex-wrap gap-3">
           <Button type="button" onClick={() => void exportPng()}>Download PNG ({BANNER_W} × {BANNER_H})</Button>
@@ -234,7 +293,7 @@ export function BannerCreator({ subject }: { subject: BannerSubjectProps }) {
           width={BANNER_W}
           height={BANNER_H}
           role="img"
-          aria-label={`${TEMPLATES[template].label} banner preview for ${name || "your name"}${designation ? `, ${designation}` : ""}${event ? `, ${event}` : ""}`}
+          aria-label={`Banner preview for ${name || "your name"}${shown("designation", designation) ? `, ${designation}` : ""}${bg.text.trim() ? `, background text ${bg.text.trim()}` : ""}`}
           data-testid="banner-canvas"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}

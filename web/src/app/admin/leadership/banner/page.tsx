@@ -52,7 +52,7 @@ async function Content({ searchParams }: { searchParams: SearchParams }) {
           <Button type="submit">Open</Button>
         </form>
       )}
-      {subject && <div className="mt-8"><BannerCreator key={id.success ? id.data : "x"} subject={{ fullName: subject.fullName, designations: subject.designations, templates: subject.templates, events: subject.events }} /></div>}
+      {subject && <div className="mt-8"><BannerCreator key={id.success ? id.data : "x"} subject={{ fullName: subject.fullName, designations: subject.designations }} /></div>}
     </>
   );
 }
