@@ -9,19 +9,21 @@ import { z } from "zod";
  */
 export const BASES = ["#090909", "#141414", "#1c1c1c"] as const; // ShadowTrix backgrounds
 export const ACCENTS = ["#f07832", "#d95f1b", "#ff9a55"] as const; // ShadowTrix oranges
-export const TEXT_COLORS = ["#ff9a55", "#f07832", "#d95f1b", "#d4d4d4", "#a3a3a3", "#f5f5f5"] as const;
-export const FONTS = ["sans", "mono", "serif", "script"] as const;
-export const FONT_LABELS: Record<(typeof FONTS)[number], string> = { sans: "Geist Sans", mono: "Geist Mono", serif: "Serif (system)", script: "Script (system)" };
-export const FONT_STACKS: Record<(typeof FONTS)[number], string> = {
-  sans: "var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif",
-  mono: "var(--font-geist-mono), ui-monospace, Menlo, Consolas, monospace",
-  serif: "ui-serif, Georgia, 'Times New Roman', serif",
-  script: "'Segoe Script', 'Brush Script MT', 'Snell Roundhand', cursive",
+/** The three decorative-text colours: white / silver, burnt orange (ShadowTrix) and emerald-neon green. */
+export const TEXT_COLORS = ["#f4f4f6", "#f07832", "#2ee59d"] as const;
+export const TEXT_COLOR_LABELS: Record<(typeof TEXT_COLORS)[number], string> = { "#f4f4f6": "White / silver", "#f07832": "Burnt orange", "#2ee59d": "Emerald green" };
+/** The five decorative typography presets. Each is a different typeface AND treatment (see components/leadership/decorative-text.tsx). */
+export const TYPO_PRESETS = ["calligraphy", "signature", "futuristic", "editorial", "matrix"] as const;
+export type TypoPreset = (typeof TYPO_PRESETS)[number];
+export const TYPO_PRESET_INFO: Record<TypoPreset, { label: string; blurb: string }> = {
+  calligraphy: { label: "Elegant Calligraphy", blurb: "Flowing, formal pen lettering (Pinyon Script)." },
+  signature: { label: "Luxury Signature", blurb: "A refined signature with a long underline stroke (Mrs Saint Delafield)." },
+  futuristic: { label: "Futuristic Display", blurb: "Wide, geometric outline lettering (Orbitron)." },
+  editorial: { label: "Editorial Serif", blurb: "High-contrast magazine serif with fine rules (DM Serif Display)." },
+  matrix: { label: "Matrix Typography", blurb: "Digital scan-line lettering with a glitch echo (Share Tech Mono)." },
 };
-export const WEIGHTS = [400, 600, 700, 800, 900] as const;
 
 const num = (min: number, max: number, dflt: number) => z.number().min(min).max(max).default(dflt);
-const hex = (dflt: string) => z.string().regex(/^#[0-9a-fA-F]{6}$/, "Use a colour like #ff9a55.").transform((v) => v.toLowerCase()).default(dflt);
 const oneOf = <T extends readonly [string, ...string[]]>(values: T, dflt: T[number]) => z.enum(values).default(dflt);
 
 const background = z.object({
@@ -33,14 +35,13 @@ const background = z.object({
   particles: num(0, 100, 40),
 });
 const typography = z.object({
-  font: oneOf(FONTS, "sans"),
-  weight: z.number().refine((w) => (WEIGHTS as readonly number[]).includes(w), "Choose one of the listed weights.").default(900),
-  color: hex("#ff9a55"),
-  size: num(8, 40, 16), // container-width percent
-  opacity: num(0.05, 1, 0.3),
-  letterSpacing: num(-0.05, 0.4, 0.02), // em
+  preset: oneOf(TYPO_PRESETS, "futuristic"),
+  color: oneOf(TEXT_COLORS, "#f07832"),
+  size: num(8, 24, 20), // 24 = the largest size that fits the card (full width); smaller values scale the lettering down in proportion, so every step is visible and nothing clips
+  opacity: num(0.05, 1, 0.5),
+  letterSpacing: num(-0.05, 0.4, 0.02), // em, added to the preset's own spacing
   x: num(-50, 50, 0),
-  y: num(-50, 50, -8),
+  y: num(-50, 50, -2),
   rotation: num(-20, 20, 0),
   layer: oneOf(["behind", "back"] as const, "behind"), // "back" also puts it behind the grid and circuits
 });
@@ -97,9 +98,29 @@ export const memberStyleSchema = z.object({
 export type MemberStyle = z.infer<typeof memberStyleSchema>;
 export const DEFAULT_MEMBER_STYLE: MemberStyle = memberStyleSchema.parse({});
 
+/**
+ * Templates saved before the typography presets stored a free font, weight and colour. They are read as the default preset with the saved colour
+ * mapped to the nearest of the three allowed ones (anything else stays untouched, so a damaged value still falls back to the default design).
+ * Writes always go through the strict schema above.
+ */
+function migrateStored(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const t = (raw as { typography?: unknown }).typography;
+  if (!t || typeof t !== "object" || Array.isArray(t)) return raw;
+  const { font: _font, weight: _weight, ...rest } = t as Record<string, unknown>;
+  void _font; void _weight;
+  if (typeof rest.size === "number") rest.size = Math.min(24, rest.size); // the size control used to go up to 40
+  const c = typeof rest.color === "string" ? rest.color.toLowerCase() : null;
+  if (c && !(TEXT_COLORS as readonly string[]).includes(c) && /^#[0-9a-f]{6}$/.test(c)) {
+    const n = parseInt(c.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+    rest.color = r > 200 && g > 200 && b > 200 ? "#f4f4f6" : g > r ? "#2ee59d" : "#f07832"; // light -> silver, green-ish -> green, otherwise orange
+  }
+  return { ...(raw as object), typography: rest };
+}
+
 /** Public rendering must never fail because of stored data: anything invalid falls back to the defaults. */
 export function parseTemplate(raw: unknown): LeadershipTemplate {
-  const r = leadershipTemplateSchema.safeParse(raw ?? {});
+  const r = leadershipTemplateSchema.safeParse(migrateStored(raw));
   return r.success ? r.data : DEFAULT_LEADERSHIP_TEMPLATE;
 }
 export function parseMemberStyle(raw: unknown): MemberStyle {

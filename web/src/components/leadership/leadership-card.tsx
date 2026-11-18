@@ -1,5 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
-import { FONT_STACKS, type LeadershipTemplate, type MemberStyle } from "@/lib/leadership/template";
+import type { LeadershipTemplate, MemberStyle } from "@/lib/leadership/template";
+import { DecorativeText, rgba as rgb } from "./decorative-text";
+import { LEADERSHIP_FONT_CLASS } from "./fonts";
 
 /** What the card shows. Only fields that are already public for a verified, published member (see getPublicTeam). */
 export interface CardPerson {
@@ -17,11 +19,6 @@ export interface CardPerson {
   /** URL of the uploaded portrait (transparent PNG/WebP), or null. */
   photoSrc: string | null;
 }
-
-const rgb = (hex: string, a: number) => {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
-};
 
 /** Deterministic pseudo-random numbers, so the artwork is identical on the server, in the browser and in every card. */
 function rng(seed: number) {
@@ -86,31 +83,26 @@ export function LeadershipCard({ person, template: t, style, eager, className }:
   const m = { zoom: 1, x: 0, y: 0, text: "", textX: 0, textY: 0, textScale: 1, ...(style ?? {}) };
   const accent = bg.accent;
 
-  // Decorative text: the member's own name unless customised. Oversized lettering that runs past the card edges is intended; only an extreme overflow is shrunk.
+  // Decorative text: the member's own name unless customised. It is lettering for atmosphere only; the typeface and treatment come from the chosen preset
+  // and it is always kept inside the card (see decorativeFontSize). The portrait stage sits above it, so it can never cover the member's face.
   const text = (m.text.trim() || person.name).slice(0, 40);
   const wanted = ty.size * m.textScale;
-  const size = wanted * Math.min(1, 200 / Math.max(1, text.length * 0.62 * wanted)); // the size control decides; only extreme overflow is reined in
 
   const decorative = (
     <div
       aria-hidden="true"
       data-testid="leadership-decorative-text"
-      className="pointer-events-none absolute select-none whitespace-nowrap"
+      data-preset={ty.preset}
+      data-text={text}
+      className="pointer-events-none absolute select-none"
       style={{
         left: `${50 + ty.x + m.textX}%`,
         top: `${44 + ty.y + m.textY}%`,
         transform: `translate(-50%, -50%) rotate(${ty.rotation}deg)`,
-        fontFamily: FONT_STACKS[ty.font],
-        fontWeight: ty.weight,
-        fontSize: `${size}cqw`,
-        lineHeight: 1,
-        letterSpacing: `${ty.letterSpacing}em`,
-        color: ty.color,
         opacity: ty.opacity,
-        textShadow: `0 0 ${2.2 * (bg.glow / 60)}cqw ${rgb(accent, 0.55)}`,
       }}
     >
-      {text}
+      <DecorativeText preset={ty.preset} text={text} color={ty.color} size={wanted} letterSpacing={ty.letterSpacing} glow={bg.glow} />
     </div>
   );
 
@@ -135,7 +127,7 @@ export function LeadershipCard({ person, template: t, style, eager, className }:
     <article
       data-testid="leadership-card"
       aria-label={`${person.name}, ${person.designation}`}
-      className={`relative isolate flex aspect-[4/5] w-full flex-col overflow-clip rounded-xl border border-white/10 ${className ?? ""}`}
+      className={`${LEADERSHIP_FONT_CLASS} relative isolate flex aspect-[4/5] w-full flex-col overflow-clip rounded-xl border border-white/10 ${className ?? ""}`}
       style={{ containerType: "inline-size", background: bg.base }}
     >
       {/* Background: ambient light, then (optionally) the text, grid, circuits and particles. All decorative. */}
@@ -153,8 +145,17 @@ export function LeadershipCard({ person, template: t, style, eager, className }:
       </svg>
       {!isBack && decorative}
 
-      {/* Portrait stage: the uploaded portrait has its background already removed, so the transparency lets the text and background show. */}
-      <div className="relative z-10 min-h-0 flex-1" data-testid="leadership-stage">
+      {/* Portrait stage. Its box is the portrait's designated area: whatever the zoom or position, nothing is ever painted outside it, and its lower edge
+          fades out just above the information board, so no portrait pixel can appear below the board or beside it. The uploaded portrait has its
+          background already removed, so its transparency lets the text and the background show through. */}
+      <div
+        className="relative z-10 min-h-0 flex-1 overflow-clip"
+        data-testid="leadership-stage"
+        style={{
+          WebkitMaskImage: STAGE_MASK(board.overlap),
+          maskImage: STAGE_MASK(board.overlap),
+        }}
+      >
         {person.photoSrc ? (
           // eslint-disable-next-line @next/next/no-img-element -- a transparent portrait served as-is by the API; the image optimiser would re-encode it
           <img
@@ -162,15 +163,11 @@ export function LeadershipCard({ person, template: t, style, eager, className }:
             alt={`Photo of ${person.name}`}
             loading={eager ? "eager" : "lazy"}
             decoding="async"
+            draggable={false}
             data-testid="leadership-portrait"
+            data-zoom={Number((t.portrait.zoom * m.zoom).toFixed(3))}
             className="absolute max-w-none select-none"
-            style={{
-              height: `${100 * t.portrait.zoom * m.zoom}%`,
-              width: "auto",
-              left: `${50 + t.portrait.x + m.x}%`,
-              ...(t.portrait.align === "bottom" ? { bottom: `${-(t.portrait.y + m.y)}%`, transform: "translateX(-50%)" } : { top: `${50 + t.portrait.y + m.y}%`, transform: "translate(-50%, -50%)" }),
-              filter: `drop-shadow(0 0 1.4cqw ${rgb(accent, 0.38)}) drop-shadow(0 0.6cqw 1.2cqw rgba(0,0,0,0.55))`,
-            }}
+            style={portraitStyle(t.portrait.align, t.portrait.zoom * m.zoom, t.portrait.x + m.x, t.portrait.y + m.y, accent)}
           />
         ) : (
           <svg aria-hidden="true" viewBox="0 0 100 100" className="absolute left-1/2 bottom-0 h-[78%] -translate-x-1/2" fill={rgb(accent, 0.4)}>
@@ -187,7 +184,7 @@ export function LeadershipCard({ person, template: t, style, eager, className }:
           marginTop: `-${board.overlap}cqw`,
           padding: "3.6cqw 4.2cqw",
           textAlign: board.align,
-          background: "linear-gradient(135deg, rgba(24,14,9,0.94), rgba(9,9,9,0.96))",
+          background: "linear-gradient(135deg, #1b100a, #0b0b0b)", // fully opaque: the board is a clean foreground layer, nothing behind it shows through
           boxShadow: `0 0 4cqw ${rgb(board.accent, 0.28)}`,
           ...boardBorder,
         }}
@@ -206,3 +203,23 @@ export function LeadershipCard({ person, template: t, style, eager, className }:
 }
 
 const ACCENT_SOFT = "#ff9a55";
+
+/** Fades the portrait stage out over its last few percent, ending exactly where the information board starts (the board overlaps the stage by `overlap`). */
+const STAGE_MASK = (overlap: number) => `linear-gradient(to bottom, #000 calc(100% - ${overlap + 5}cqw), transparent calc(100% - ${overlap}cqw))`;
+
+/**
+ * The portrait: it fits the stage at zoom 1 (full height, natural width, never stretched), is anchored to the bottom (or centred), and zooms about
+ * a point near the face, so a bigger zoom enlarges the portrait without pushing the head out of the card. The position offsets are percentages of
+ * the portrait's own size and are independent of the zoom and of each other.
+ */
+function portraitStyle(align: "bottom" | "center", zoom: number, x: number, y: number, accent: string): CSSProperties {
+  const move = `translate(${x}%, ${y}%) scale(${zoom})`;
+  return {
+    height: "100%",
+    width: "auto",
+    left: "50%",
+    transformOrigin: "50% 30%",
+    ...(align === "bottom" ? { bottom: 0, transform: `translate(-50%, 0) ${move}` } : { top: "50%", transform: `translate(-50%, -50%) ${move}` }),
+    filter: `drop-shadow(0 0 1.2cqw ${rgb(accent, 0.34)})`,
+  };
+}

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { DownloadTemplate } from "@/components/admin/download-template";
+import { PortraitDragLayer, type DragValue } from "@/components/admin/portrait-drag";
 import { TemplateControls } from "@/components/admin/leadership-controls";
 import { LeadershipCard, type CardPerson } from "@/components/leadership/leadership-card";
 import { Button } from "@/components/ui/button";
@@ -15,10 +16,9 @@ export const DEVICES = [
 ] as const;
 export type DeviceId = (typeof DEVICES)[number]["id"];
 
-const HEX = /^#[0-9a-fA-F]{6}$/;
 
 /** A device switcher plus the card, exactly as the public pages render it (the same component, the same template). */
-export function DevicePreview({ person, template, style }: { person: CardPerson; template: LeadershipTemplate; style?: Partial<MemberStyle> | null }) {
+export function DevicePreview({ person, template, style, drag }: { person: CardPerson; template: LeadershipTemplate; style?: Partial<MemberStyle> | null; drag?: { value: DragValue; onChange: (v: DragValue) => void } }) {
   const [device, setDevice] = useState<DeviceId>("desktop");
   const width = DEVICES.find((d) => d.id === device)!.width;
   return (
@@ -31,8 +31,9 @@ export function DevicePreview({ person, template, style }: { person: CardPerson;
         ))}
       </div>
       <div role="region" aria-label="Card preview" tabIndex={0} className="overflow-x-auto rounded-lg border border-dashed border-border p-4">
-        <div style={{ width: `min(${width}px, 100%)` }} className="mx-auto" data-testid="leadership-preview-frame" data-device={device}>
+        <div style={{ width: `min(${width}px, 100%)` }} className="relative mx-auto" data-testid="leadership-preview-frame" data-device={device}>
           <LeadershipCard person={person} template={template} style={style} eager />
+          {drag && person.photoSrc && <PortraitDragLayer value={drag.value} onChange={drag.onChange} />}
         </div>
       </div>
       <p className="text-center text-xs text-fg-muted">{DEVICES.find((d) => d.id === device)!.label} width: {width}px. This is the same card the public pages show.</p>
@@ -42,14 +43,13 @@ export function DevicePreview({ person, template, style }: { person: CardPerson;
 
 export interface PreviewOption { id: string; name: string }
 
-export function LeadershipTemplateEditor({ initial, person, members, selectedMemberId }: { initial: LeadershipTemplate; person: CardPerson; members: PreviewOption[]; selectedMemberId: string }) {
+export function LeadershipTemplateEditor({ initial, person, members, selectedMemberId, memberStyle }: { initial: LeadershipTemplate; person: CardPerson; members: PreviewOption[]; selectedMemberId: string; memberStyle?: MemberStyle | null }) {
   const [t, setT] = useState<LeadershipTemplate>(initial);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [validColor, setValidColor] = useState(initial.typography.color); // the preview keeps the last valid colour while a hex is being typed
-  const update = (next: LeadershipTemplate) => { setT(next); if (HEX.test(next.typography.color)) setValidColor(next.typography.color); };
-  const preview: LeadershipTemplate = HEX.test(t.typography.color) ? t : { ...t, typography: { ...t.typography, color: validColor } };
+  const update = (next: LeadershipTemplate) => setT(next);
+  const preview: LeadershipTemplate = t;
 
   async function call(method: "PUT" | "DELETE", body?: unknown) {
     setBusy(true); setError(""); setStatus("");
@@ -64,7 +64,6 @@ export function LeadershipTemplateEditor({ initial, person, members, selectedMem
   }
 
   async function save() {
-    if (!HEX.test(t.typography.color)) return setError("Use a text colour like #ff9a55 before saving.");
     const saved = await call("PUT", t);
     if (saved) { update(saved); setStatus("Template saved. It now applies to every board member on the homepage and the Leadership Board."); }
   }
@@ -99,8 +98,9 @@ export function LeadershipTemplateEditor({ initial, person, members, selectedMem
           <Button type="submit" variant="secondary" size="sm">Show</Button>
           <Link href="/about/team" className="text-sm underline underline-offset-4">Open the public Leadership Board</Link>
         </form>
-        <DevicePreview person={person} template={preview} />
-        <DownloadTemplate person={person} template={preview} />
+        <DevicePreview person={person} template={preview} style={memberStyle} drag={{ value: { x: t.portrait.x, y: t.portrait.y }, onChange: (v) => update({ ...t, portrait: { ...t.portrait, x: v.x, y: v.y } }) }} />
+        {person.photoSrc && <p className="text-xs text-fg-muted">Drag the portrait in the preview to set the default portrait position for every member (or use the position sliders). Each member can still be adjusted on their own page.</p>}
+        <DownloadTemplate person={person} template={preview} style={memberStyle} />
       </div>
     </div>
   );

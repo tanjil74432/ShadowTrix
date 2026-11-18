@@ -1,9 +1,11 @@
 "use client";
 
 import { useId, type ReactNode } from "react";
+import { DecorativeText } from "@/components/leadership/decorative-text";
+import { LEADERSHIP_FONT_CLASS } from "@/components/leadership/fonts";
 import {
-  ACCENTS, BASES, FONTS, FONT_LABELS, TEXT_COLORS, WEIGHTS,
-  type LeadershipTemplate,
+  ACCENTS, BASES, TEXT_COLORS, TEXT_COLOR_LABELS, TYPO_PRESETS, TYPO_PRESET_INFO,
+  type LeadershipTemplate, type TypoPreset,
 } from "@/lib/leadership/template";
 
 /** Small control kit shared by the template editor and the member card editor. Every control is a real labelled form element. */
@@ -38,18 +40,41 @@ export function ToggleControl({ label, checked, onChange }: { label: string; che
   );
 }
 
-export function ColorControl({ label, value, palette, onChange }: { label: string; value: string; palette: readonly string[]; onChange: (v: string) => void }) {
+export function ColorControl({ label, value, palette, onChange, names, custom = true }: { label: string; value: string; palette: readonly string[]; onChange: (v: string) => void; names?: Record<string, string>; custom?: boolean }) {
   const id = useId();
   return (
     <div className="space-y-1">
       <span id={`${id}-l`} className="block text-sm">{label}</span>
       <div role="group" aria-labelledby={`${id}-l`} className="flex flex-wrap items-center gap-2">
         {palette.map((c) => (
-          <button key={c} type="button" aria-label={`${label} ${c}`} aria-pressed={value === c} onClick={() => onChange(c)} className="size-7 rounded-full border-2 outline-offset-2 focus-visible:outline focus-visible:outline-2" style={{ background: c, borderColor: value === c ? "#f5f5f5" : "transparent" }} />
+          <button key={c} type="button" aria-label={`${label}: ${names?.[c] ?? c}`} title={names?.[c] ?? c} aria-pressed={value === c} onClick={() => onChange(c)} className="size-8 rounded-full border-2 outline-offset-2 focus-visible:outline focus-visible:outline-2" style={{ background: c, borderColor: value === c ? "#f5f5f5" : "rgba(255,255,255,0.18)" }} />
         ))}
-        <input aria-label={`${label}, custom hex colour`} value={value} onChange={(e) => onChange(e.target.value)} maxLength={7} className="h-9 w-24 rounded-md border border-border bg-surface px-2 text-sm" />
+        {custom && <input aria-label={`${label}, custom hex colour`} value={value} onChange={(e) => onChange(e.target.value)} maxLength={7} className="h-9 w-24 rounded-md border border-border bg-surface px-2 text-sm" />}
       </div>
+      {names && <p className="text-xs text-fg-muted" aria-live="polite">{names[value] ?? value}</p>}
     </div>
+  );
+}
+
+/** The five typography presets, each shown as a live sample in the chosen colour. Real radio buttons: arrow keys move between them. */
+export function PresetPicker({ value, color, glow, onChange }: { value: TypoPreset; color: string; glow: number; onChange: (v: TypoPreset) => void }) {
+  const name = useId();
+  return (
+    <fieldset className="min-w-0 space-y-2">
+      <legend className="text-sm">Typography preset</legend>
+      <div className={`${LEADERSHIP_FONT_CLASS} grid gap-2 sm:grid-cols-2`}>
+        {TYPO_PRESETS.map((p) => (
+          <label key={p} className="relative flex cursor-pointer flex-col gap-1.5 rounded-lg border border-border p-2 has-[:checked]:border-accent has-[:checked]:bg-surface-raised has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2">
+            <input type="radio" name={name} value={p} checked={value === p} onChange={() => onChange(p)} className="sr-only" data-testid={`preset-${p}`} />
+            <span aria-hidden="true" data-testid={`preset-swatch-${p}`} className="flex h-16 items-center justify-center overflow-hidden rounded-md" style={{ containerType: "inline-size", background: "linear-gradient(135deg, #1b100a, #090909)" }}>
+              <DecorativeText preset={p} text="Aarav" color={color} size={22} letterSpacing={0} glow={glow} maxWidth={82} />
+            </span>
+            <span className="text-sm font-medium">{TYPO_PRESET_INFO[p].label}</span>
+            <span className="text-xs text-fg-muted">{TYPO_PRESET_INFO[p].blurb}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 
@@ -66,7 +91,6 @@ export function ControlGroup({ title, children }: { title: string; children: Rea
 export function TemplateControls({ t, set }: { t: LeadershipTemplate; set: (next: LeadershipTemplate) => void }) {
   const upd = <S extends keyof LeadershipTemplate, K extends keyof LeadershipTemplate[S]>(section: S, key: K, value: LeadershipTemplate[S][K]) => set({ ...t, [section]: { ...t[section], [key]: value } });
   const b = t.background, ty = t.typography, p = t.portrait, bd = t.board;
-  const hexOk = /^#[0-9a-fA-F]{6}$/.test(ty.color);
   return (
     <div className="space-y-5">
       <ControlGroup title="Background">
@@ -80,11 +104,9 @@ export function TemplateControls({ t, set }: { t: LeadershipTemplate; set: (next
 
       <ControlGroup title="Decorative typography (behind the portrait)">
         <p className="text-xs text-fg-muted">Uses the member&apos;s name unless you give a member their own text. It is decoration only: it never changes the verified name or designation.</p>
-        <SelectControl label="Font" value={ty.font} options={FONTS.map((f) => ({ value: f, label: FONT_LABELS[f] }))} onChange={(v) => upd("typography", "font", v)} />
-        <SelectControl label="Weight" value={ty.weight} options={WEIGHTS.map((w) => ({ value: w, label: String(w) }))} onChange={(v) => upd("typography", "weight", v)} />
-        <ColorControl label="Text colour" value={ty.color} palette={TEXT_COLORS} onChange={(v) => upd("typography", "color", v)} />
-        {!hexOk && <p role="alert" className="text-xs text-danger">Use a colour like #ff9a55. The preview keeps the last valid colour.</p>}
-        <RangeControl label="Font size" value={ty.size} min={8} max={40} step={0.5} onChange={(v) => upd("typography", "size", v)} unit="%" />
+        <PresetPicker value={ty.preset} color={ty.color} glow={b.glow} onChange={(v) => upd("typography", "preset", v)} />
+        <ColorControl label="Text colour" value={ty.color} palette={TEXT_COLORS} names={TEXT_COLOR_LABELS} custom={false} onChange={(v) => upd("typography", "color", v as (typeof TEXT_COLORS)[number])} />
+        <RangeControl label="Font size" value={ty.size} min={8} max={24} step={0.5} onChange={(v) => upd("typography", "size", v)} unit="%" />
         <RangeControl label="Opacity" value={ty.opacity} min={0.05} max={1} step={0.01} onChange={(v) => upd("typography", "opacity", v)} />
         <RangeControl label="Letter spacing" value={ty.letterSpacing} min={-0.05} max={0.4} step={0.01} onChange={(v) => upd("typography", "letterSpacing", v)} unit="em" />
         <RangeControl label="Position, left / right" value={ty.x} min={-50} max={50} step={1} onChange={(v) => upd("typography", "x", v)} unit="%" />
@@ -97,8 +119,8 @@ export function TemplateControls({ t, set }: { t: LeadershipTemplate; set: (next
         <p className="text-xs text-fg-muted">Upload a portrait whose background is already removed (PNG or WebP with transparency); it is shown exactly as uploaded.</p>
         <SelectControl label="Alignment" value={p.align} options={[{ value: "bottom", label: "Anchored to the bottom" }, { value: "center", label: "Centred" }]} onChange={(v) => upd("portrait", "align", v)} />
         <RangeControl label="Zoom / scale" value={p.zoom} min={0.5} max={3} step={0.01} onChange={(v) => upd("portrait", "zoom", v)} />
-        <RangeControl label="Position, left / right" value={p.x} min={-50} max={50} step={1} onChange={(v) => upd("portrait", "x", v)} unit="%" />
-        <RangeControl label="Position, up / down" value={p.y} min={-50} max={50} step={1} onChange={(v) => upd("portrait", "y", v)} unit="%" />
+        <RangeControl label="Position, left / right" value={p.x} min={-50} max={50} step={0.1} onChange={(v) => upd("portrait", "x", v)} unit="%" />
+        <RangeControl label="Position, up / down" value={p.y} min={-50} max={50} step={0.1} onChange={(v) => upd("portrait", "y", v)} unit="%" />
         <button type="button" onClick={() => set({ ...t, portrait: { align: "bottom", zoom: 1, x: 0, y: 0 } })} className="text-sm underline underline-offset-4">Reset portrait positioning</button>
       </ControlGroup>
 

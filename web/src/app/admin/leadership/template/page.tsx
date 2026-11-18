@@ -9,7 +9,7 @@ import type { CardPerson } from "@/components/leadership/leadership-card";
 import { Container } from "@/components/ui/container";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireUser } from "@/server/modules/auth/dal";
-import { getLeadershipTemplate } from "@/server/modules/organization/leadership-template.service";
+import { getLeadershipTemplate, getMemberStyle } from "@/server/modules/organization/leadership-template.service";
 import { getMember, listMembers } from "@/server/modules/organization/organization.service";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -35,9 +35,11 @@ async function Content({ searchParams }: { searchParams: SearchParams }) {
   const id = z.uuid().safeParse(Array.isArray(sp.member) ? sp.member[0] : sp.member);
   const [template, members] = await Promise.all([getLeadershipTemplate(), listMembers(actor, {})]);
   let person = SAMPLE;
+  let memberStyle = null;
   if (id.success) {
     const m = await getMember(actor, id.data).catch(() => null);
     if (m) {
+      memberStyle = await getMemberStyle(m.id); // the member as published: their own portrait position and decorative text
       const current = m.memberships.find((x) => !x.isArchived) ?? m.memberships[0];
       person = {
         id: m.id, name: m.fullName, designation: current?.designation.title ?? "Designation", unitName: current?.unit.name ?? null, term: current?.term?.label ?? null,
@@ -55,7 +57,7 @@ async function Content({ searchParams }: { searchParams: SearchParams }) {
         change a member&apos;s portrait position and decorative text on their own page. Saving here updates the homepage and the Leadership Board for every published member.
       </p>
       <div className="mt-8">
-        <LeadershipTemplateEditor initial={template} person={person} members={members.slice(0, 100).map((m) => ({ id: m.id, name: m.fullName }))} selectedMemberId={id.success ? id.data : ""} />
+        <LeadershipTemplateEditor initial={template} person={person} members={members.slice(0, 100).map((m) => ({ id: m.id, name: m.fullName }))} selectedMemberId={id.success ? id.data : ""} memberStyle={memberStyle} />
       </div>
     </>
   );

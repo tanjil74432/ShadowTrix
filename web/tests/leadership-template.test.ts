@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
 import sharp from "sharp";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { DEFAULT_LEADERSHIP_TEMPLATE, DEFAULT_MEMBER_STYLE, leadershipTemplateSchema, memberStyleKey, memberStyleSchema, parseMemberStyle, parseTemplate, TEMPLATE_KEY } from "@/lib/leadership/template";
+import { DEFAULT_LEADERSHIP_TEMPLATE, DEFAULT_MEMBER_STYLE, leadershipTemplateSchema, memberStyleKey, memberStyleSchema, parseMemberStyle, parseTemplate, TEMPLATE_KEY, TEXT_COLORS, TYPO_PRESETS } from "@/lib/leadership/template";
 import { getDb } from "@/server/db/client";
 import { deleteMemberStyle, getLeadershipTemplate, getMemberStyle, resetLeadershipTemplate, saveLeadershipTemplate, saveMemberStyle } from "@/server/modules/organization/leadership-template.service";
 import * as org from "@/server/modules/organization/organization.service";
@@ -75,25 +75,40 @@ async function publishedMember(opts: { published?: boolean; placeholder?: boolea
 describe("template schema", () => {
   it("applies the default design to nothing, and accepts a partial design by filling in the rest", () => {
     expect(leadershipTemplateSchema.parse({})).toEqual(DEFAULT_LEADERSHIP_TEMPLATE);
-    const t = leadershipTemplateSchema.parse({ typography: { size: 30 } });
-    expect(t.typography.size).toBe(30);
-    expect(t.typography.font).toBe(DEFAULT_LEADERSHIP_TEMPLATE.typography.font);
+    const t = leadershipTemplateSchema.parse({ typography: { size: 22 } });
+    expect(t.typography.size).toBe(22);
+    expect(t.typography.preset).toBe(DEFAULT_LEADERSHIP_TEMPLATE.typography.preset);
     expect(t.board).toEqual(DEFAULT_LEADERSHIP_TEMPLATE.board);
   });
 
   it("clamps and validates: out-of-range numbers, bad colours, unknown fonts and palettes are refused", () => {
     for (const bad of [
-      { typography: { size: 500 } }, { typography: { size: 1 } }, { typography: { opacity: 2 } }, { typography: { color: "orange" } }, { typography: { color: "#ggg000" } },
-      { typography: { font: "comic-sans" } }, { typography: { weight: 123 } }, { typography: { rotation: 90 } }, { background: { grid: 101 } }, { background: { base: "#ffffff" } },
+      { typography: { size: 500 } }, { typography: { size: 25 } }, { typography: { size: 1 } }, { typography: { opacity: 2 } }, { typography: { color: "orange" } }, { typography: { color: "#ggg000" } },
+      { typography: { color: "#ff9a55" } }, { typography: { color: "#F4F4F6" } }, { typography: { preset: "comic-sans" } }, { typography: { preset: 3 } }, { typography: { rotation: 90 } }, { background: { grid: 101 } }, { background: { base: "#ffffff" } },
       { background: { accent: "#00ff00" } }, { portrait: { zoom: 9 } }, { portrait: { align: "top" } }, { board: { nameSize: 50 } }, { board: { border: "dotted" } }, { board: { showUnit: "yes" } },
       { typography: { size: "22" } }, { typography: { size: null } }, { typography: { size: NaN } },
     ]) expect(leadershipTemplateSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
-    expect(leadershipTemplateSchema.parse({ typography: { color: "#FF9A55" } }).typography.color).toBe("#ff9a55"); // colours are normalised
+    // exactly the three colours and five presets are accepted
+    for (const color of TEXT_COLORS) expect(leadershipTemplateSchema.parse({ typography: { color } }).typography.color).toBe(color);
+    for (const preset of TYPO_PRESETS) expect(leadershipTemplateSchema.parse({ typography: { preset } }).typography.preset).toBe(preset);
+    expect(TEXT_COLORS).toHaveLength(3);
+    expect(TYPO_PRESETS).toHaveLength(5);
+  });
+
+  it("a template saved before the presets existed is still read: its other settings survive, the old font and weight are dropped, the colour maps to the nearest allowed one", () => {
+    const legacy = (typography: object) => parseTemplate({ background: { grid: 12 }, typography });
+    const a = legacy({ font: "mono", weight: 900, color: "#ff9a55", size: 20, x: 5 });
+    expect(a.background.grid).toBe(12);
+    expect(a.typography).toMatchObject({ size: 20, x: 5, preset: DEFAULT_LEADERSHIP_TEMPLATE.typography.preset, color: "#f07832" });
+    expect(legacy({ size: 40 }).typography.size).toBe(24); // the size control used to go up to 40; it now tops out at "fills the card"
+    expect(legacy({ color: "#d4d4d4" }).typography.color).toBe("#f4f4f6");
+    expect(legacy({ color: "#22cc88" }).typography.color).toBe("#2ee59d");
+    expect(parseTemplate({ typography: { size: "huge", color: "#ff9a55" } })).toEqual(DEFAULT_LEADERSHIP_TEMPLATE); // damaged data still falls back to the default design
   });
 
   it("the public reader never fails: invalid stored data falls back to the default design", () => {
     expect(parseTemplate(null)).toEqual(DEFAULT_LEADERSHIP_TEMPLATE);
-    expect(parseTemplate({ typography: { size: 9999 } })).toEqual(DEFAULT_LEADERSHIP_TEMPLATE);
+    expect(parseTemplate({ typography: { size: "huge" } })).toEqual(DEFAULT_LEADERSHIP_TEMPLATE);
     expect(parseTemplate("garbage")).toEqual(DEFAULT_LEADERSHIP_TEMPLATE);
     expect(parseMemberStyle({ zoom: 99 })).toEqual(DEFAULT_MEMBER_STYLE);
   });
@@ -124,8 +139,8 @@ describe("saving the template and member styles (administrators only)", () => {
   it("the template persists across reads, can be reset, and every change is audited", async () => {
     const a = await admin();
     expect(await getLeadershipTemplate()).toEqual(DEFAULT_LEADERSHIP_TEMPLATE);
-    const saved = await saveLeadershipTemplate(a, { typography: { size: 31, text: "ignored" }, background: { glow: 80 }, board: { showBio: true } });
-    expect(saved.typography.size).toBe(31);
+    const saved = await saveLeadershipTemplate(a, { typography: { size: 17, text: "ignored" }, background: { glow: 80 }, board: { showBio: true } });
+    expect(saved.typography.size).toBe(17);
     expect(saved).not.toHaveProperty("typography.text");
     const again = await getLeadershipTemplate(); // a fresh read, as after a page reload
     expect(again).toEqual(saved);
@@ -177,11 +192,11 @@ describe("what the public pages receive: getPublicTeam()", () => {
   it("carries the shared template, the member's own style, the unit slug and a photo fingerprint (never the storage key)", async () => {
     const a = await admin();
     const { m, unit } = await publishedMember();
-    await saveLeadershipTemplate(a, { typography: { size: 28 } });
+    await saveLeadershipTemplate(a, { typography: { size: 22 } });
     await saveMemberStyle(a, m.id, { text: "SHADOW", zoom: 1.2 });
     await org.setMemberPhoto(a, m.id, { name: "me.png", declaredMime: "image/png", bytes: png(0) });
     const result = await team();
-    expect(result.template.typography.size).toBe(28);
+    expect(result.template.typography.size).toBe(22);
     const u = result.units.find((x) => x.id === unit.id)!;
     expect(u.slug).toBe(unit.slug);
     const p = u.people.find((x) => x.id === m.id)!;

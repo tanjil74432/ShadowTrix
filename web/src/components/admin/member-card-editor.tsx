@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ControlGroup, RangeControl } from "@/components/admin/leadership-controls";
+import { DownloadTemplate } from "@/components/admin/download-template";
 import { DevicePreview } from "@/components/admin/leadership-template-editor";
 import type { CardPerson } from "@/components/leadership/leadership-card";
 import { Button } from "@/components/ui/button";
@@ -46,8 +47,8 @@ export function MemberCardEditor({ memberId, person, template, initial, publishe
       <div className="min-w-0 space-y-5">
         <ControlGroup title="Portrait position">
           <RangeControl label="Zoom" value={s.zoom} min={0.5} max={3} step={0.01} onChange={(v) => set("zoom", v)} />
-          <RangeControl label="Left / right" value={s.x} min={-50} max={50} step={1} onChange={(v) => set("x", v)} unit="%" />
-          <RangeControl label="Up / down" value={s.y} min={-50} max={50} step={1} onChange={(v) => set("y", v)} unit="%" />
+          <RangeControl label="Left / right" value={s.x} min={-50} max={50} step={0.1} onChange={(v) => set("x", v)} unit="%" />
+          <RangeControl label="Up / down" value={s.y} min={-50} max={50} step={0.1} onChange={(v) => set("y", v)} unit="%" />
           <button type="button" onClick={() => setS((x) => ({ ...x, zoom: 1, x: 0, y: 0 }))} className="text-sm underline underline-offset-4">Reset portrait positioning</button>
         </ControlGroup>
         <ControlGroup title="Decorative text for this member">
@@ -69,7 +70,11 @@ export function MemberCardEditor({ memberId, person, template, initial, publishe
         <p role="alert" className="min-h-5 text-sm text-danger">{error}</p>
         <p role="status" className="min-h-5 text-sm text-fg-muted">{status}</p>
       </div>
-      <div className="min-w-0 lg:sticky lg:top-24"><DevicePreview person={person} template={template} style={s} /></div>
+      <div className="min-w-0 space-y-3 lg:sticky lg:top-24">
+        <DevicePreview person={person} template={template} style={s} drag={{ value: { x: s.x, y: s.y }, onChange: (v) => setS((x) => ({ ...x, x: v.x, y: v.y })) }} />
+        {hasPhoto && <p className="text-xs text-fg-muted">Click and hold the portrait in the preview, then drag it in any direction. Arrow keys nudge it. Zoom and position work together.</p>}
+        <DownloadTemplate person={person} template={template} style={s} label="Download this card" />
+      </div>
     </div>
   );
 }

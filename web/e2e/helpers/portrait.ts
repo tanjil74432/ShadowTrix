@@ -30,3 +30,26 @@ export function portraitPng(): Buffer {
   const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6;
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(Buffer.concat(rows))), chunk("IEND", Buffer.alloc(0))]);
 }
+
+/**
+ * A more natural transparent cut-out for visual evidence: hair, head, neck, collar and shoulders on a FULLY TRANSPARENT background, 240 x 300
+ * (the same size as PORTRAIT). Drawn from SVG by the image library, so it is a real PNG with an alpha channel.
+ */
+export async function silhouettePng(): Promise<Buffer> {
+  const { default: sharp } = await import("sharp");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="300" viewBox="0 0 240 300">
+    <defs>
+      <linearGradient id="cloth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2d3445"/><stop offset="1" stop-color="#171b26"/></linearGradient>
+      <linearGradient id="skin" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e6b894"/><stop offset="1" stop-color="#c98f69"/></linearGradient>
+    </defs>
+    <path d="M6 300 C6 238 52 214 98 206 L142 206 C188 214 234 238 234 300 Z" fill="url(#cloth)"/>
+    <rect x="104" y="170" width="32" height="48" rx="12" fill="#c98f69"/>
+    <path d="M98 206 L120 246 L142 206 L128 200 L112 200 Z" fill="#e9edf5"/>
+    <path d="M98 206 L120 246 L108 214 Z" fill="#0f1320"/><path d="M142 206 L120 246 L132 214 Z" fill="#0f1320"/>
+    <ellipse cx="120" cy="108" rx="40" ry="52" fill="url(#skin)"/>
+    <path d="M78 104 C74 52 108 40 124 40 C156 40 170 66 162 104 C158 84 146 70 120 68 C98 68 84 82 78 104 Z" fill="#1d1a19"/>
+    <ellipse cx="106" cy="112" rx="3.6" ry="2.6" fill="#2a1d18"/><ellipse cx="134" cy="112" rx="3.6" ry="2.6" fill="#2a1d18"/>
+    <path d="M108 138 C116 144 124 144 132 138" fill="none" stroke="#8e5a40" stroke-width="2.4" stroke-linecap="round"/>
+  </svg>`;
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
