@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { toCardPerson } from "@/components/leadership/card-person";
+import { LeadershipCard } from "@/components/leadership/leadership-card";
 import { ComingSoon } from "@/components/layout/coming-soon";
 import { Container } from "@/components/ui/container";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -39,9 +41,11 @@ async function TeamContent() {
       <h1 className="text-h1 font-semibold text-balance">Our Team</h1>
       <p className="mt-3 max-w-2xl text-fg-muted text-pretty">The people who run ShadowTrix. The organizers of each event are listed on the event itself.</p>
       {team.units.map((u) => (
-        <section key={u.id} aria-labelledby={`unit-${u.id}`} className="mt-12">
+        <section key={u.id} id={u.slug} aria-labelledby={`unit-${u.id}`} className="mt-12 scroll-mt-24" data-testid="team-unit">
           <h2 id={`unit-${u.id}`} className="text-h2 font-semibold">{u.name}</h2>
-          <ul className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">{u.people.map((p) => <Person key={p.id} p={p} />)}</ul>
+          <ul className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {u.people.map((p, i) => <li key={p.id}><LeadershipCard person={toCardPerson(p, u.name)} template={team.template} style={p.style} eager={i < 3} /></li>)}
+          </ul>
         </section>
       ))}
       {team.former.length > 0 && (

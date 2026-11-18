@@ -300,12 +300,15 @@ test.describe("fixed preview layout", () => {
     const person = await users.create({ fullName: "Size Person" });
     await page.setViewportSize({ width: 1440, height: 760 });
     await uiLogin(page, person, "/dashboard/banner");
-    const small = await page.getByTestId("banner-canvas").boundingBox();
+    // boundingBox() does not wait for visibility: right after login the route is still being shown and the canvas can be in the page but not yet visible
+    // (it returned null in that window). Wait until it is on screen, then measure.
+    const canvas = page.getByTestId("banner-canvas");
+    await expect(canvas).toBeVisible();
+    const small = (await canvas.boundingBox())!;
     await page.setViewportSize({ width: 1440, height: 1100 });
-    await page.waitForTimeout(400);
-    const large = await page.getByTestId("banner-canvas").boundingBox();
-    expect(large!.height).toBeGreaterThan(small!.height + 150);
-    expect(Math.abs(large!.width / large!.height - 0.8)).toBeLessThan(0.004);
+    await expect.poll(async () => (await canvas.boundingBox())?.height ?? 0, { message: "a taller window gives a larger preview" }).toBeGreaterThan(small.height + 150);
+    const large = (await canvas.boundingBox())!;
+    expect(Math.abs(large.width / large.height - 0.8)).toBeLessThan(0.004);
   });
 
   test("phone width: a clean stacked layout, the preview comes first, nothing is clipped sideways and the page scrolls normally", async ({ page, users }) => {

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { AboutOrg } from "@/components/home/about-org";
 import { Categories } from "@/components/home/categories";
 import { Community } from "@/components/home/community";
@@ -7,6 +8,8 @@ import { Hero } from "@/components/home/hero";
 import { HowItWorks } from "@/components/home/how-it-works";
 import { LeadershipPreview } from "@/components/home/leadership-preview";
 import { PreviousEvents } from "@/components/home/previous-events";
+import { Container } from "@/components/ui/container";
+import { Skeleton } from "@/components/ui/skeleton";
 import { site } from "@/lib/site";
 
 const organizationJsonLd = {
@@ -32,7 +35,9 @@ export default function HomePage() {
       <Categories />
       <HowItWorks />
       <AboutOrg />
-      <LeadershipPreview />
+      <Suspense fallback={<section aria-label="Leadership" className="py-section"><Container><Skeleton className="h-96 w-full" /></Container></section>}>
+        <LeadershipPreview />
+      </Suspense>
       <Community />
       <PreviousEvents />
       <Cta />

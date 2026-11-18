@@ -37,6 +37,8 @@ async function Content({ searchParams }: { searchParams: SearchParams }) {
         The people who run ShadowTrix, shown on the public Our Team page. This is separate from the organizers of individual events. Nothing appears publicly until a profile is marked <strong>verified</strong> (not a placeholder) and <strong>published</strong>. No people are pre-filled.
       </p>
 
+      <p className="mt-4"><Link href="/admin/leadership/template" className="inline-flex h-10 items-center rounded-md border border-border-strong px-4 text-sm font-medium hover:border-accent/70">Edit the Universal Matrix template</Link></p>
+
       <section aria-labelledby="members-heading" className="mt-10">
         <h2 id="members-heading" className="text-h3 font-semibold">Members ({members.length})</h2>
         <p className="mt-2 text-sm"><Link href="/admin/leadership/banner" className="underline underline-offset-4">Create an official banner for a verified member</Link></p>

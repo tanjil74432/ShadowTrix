@@ -1,3 +1,4 @@
+import { portraitPng } from "./helpers/portrait";
 import { randomUUID } from "node:crypto";
 import { COOKIE, JSON_HEADERS, ORIGIN, createRawSession, db, expect, test } from "./helpers/fixtures";
 
@@ -10,7 +11,7 @@ import { COOKIE, JSON_HEADERS, ORIGIN, createRawSession, db, expect, test } from
  *   5. Declared size, body parsing, field and file validation -> 411 / 413 / 400
  * JSON endpoints keep their documented order (origin, content type, then authentication): see docs/api/conventions.md.
  */
-const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fcffff3f0300050001a5f645400000000049454e44ae426082", "hex");
+const PNG = portraitPng(); // a real, decodable image: portraits are now decoded before they are stored
 const cookie = async (user: { id: string }) => ({ Cookie: `${COOKIE}=${await createRawSession(user.id)}` });
 
 type Target = { name: string; url: string; allowed: () => Promise<Record<string, string>>; denied: () => Promise<Record<string, string>>; good: { name: string; mimeType: string; buffer: Buffer } };

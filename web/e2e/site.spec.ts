@@ -151,11 +151,18 @@ test.describe("structure, SEO and audit requirements", () => {
     expect(n).toBe(6);
     for (let i = 0; i < n; i++) await expect(eventCards.nth(i).getByText("Sample", { exact: true })).toBeVisible();
     // every leadership card is marked as a placeholder, and no real-looking names appear
+    // Placeholders are only a fallback: once real members are published (another spec may do so while this one runs) the homepage shows them
+    // instead, with no placeholder cards and no leadership sample notice. Either state must be self-consistent.
+    const realLeadership = await page.getByTestId("leadership-card").count();
     const profiles = page.locator("article:has-text('Placeholder profile')");
-    expect(await profiles.count()).toBe(4);
-    expect(await cards.count()).toBeGreaterThanOrEqual(10);
-    // one notice above each block of sample content: featured events, timeline example, leadership, previous events
-    await expect(page.getByRole("note")).toHaveCount(4);
+    if (realLeadership === 0) {
+      expect(await profiles.count()).toBe(4);
+      expect(await cards.count()).toBeGreaterThanOrEqual(10);
+    } else {
+      expect(await profiles.count()).toBe(0);
+    }
+    // one notice above each block of sample content: featured events, timeline example, leadership (only while it is a placeholder), previous events
+    await expect(page.getByRole("note")).toHaveCount(realLeadership === 0 ? 4 : 3);
     expect(await page.locator("body").innerText()).not.toMatch(/lorem|ipsum/i);
   });
 

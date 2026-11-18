@@ -13,7 +13,9 @@ const fallback = <Container className="py-14"><Skeleton className="h-96 w-full" 
 import Image from "next/image";
 import { ApiButton } from "@/components/common/api-button";
 import { JsonForm } from "@/components/admin/json-form";
+import { MemberCardEditor } from "@/components/admin/member-card-editor";
 import { PhotoUploader } from "@/components/admin/photo-uploader";
+import { getLeadershipTemplate, getMemberStyle } from "@/server/modules/organization/leadership-template.service";
 import { getMember, listLeadershipReference } from "@/server/modules/organization/organization.service";
 
 export const metadata: Metadata = { title: "Member", robots: { index: false, follow: false } };
@@ -33,12 +35,13 @@ async function Gate({ params }: { params: Params }) {
 async function Detail({ id }: { id: string }) {
   const actor = await requireUser(`/admin/leadership/members/${id}`);
   await connection();
-  let m, ref;
+  let m, ref, template, style;
   try {
-    [m, ref] = await Promise.all([getMember(actor, id), listLeadershipReference(actor)]);
+    [m, ref, template, style] = await Promise.all([getMember(actor, id), listLeadershipReference(actor), getLeadershipTemplate(), getMemberStyle(id)]);
   } catch {
     notFound();
   }
+  const current = m.memberships.find((x) => !x.isArchived) ?? m.memberships[0];
   const opt = (rows: { id: string; label: string }[], empty = "None") => [{ value: "", label: empty }, ...rows.map((r) => ({ value: r.id, label: r.label }))];
   return (
     <>
@@ -50,6 +53,21 @@ async function Detail({ id }: { id: string }) {
       <section aria-labelledby="photo-heading" className="mt-10 max-w-xl space-y-3"><h2 id="photo-heading" className="text-h3 font-semibold">Photo</h2>
         {m.photoUrl && <Image src={m.photoUrl} alt={`Photo of ${m.fullName}`} width={160} height={160} unoptimized className="size-40 rounded-lg object-cover" />}
         <PhotoUploader memberId={m.id} hasPhoto={!!m.photoUrl} /></section>
+
+      <section aria-labelledby="card-heading" className="mt-10">
+        <h2 id="card-heading" className="text-h3 font-semibold">Card design</h2>
+        <p className="mt-2 max-w-3xl text-fg-muted">How this member looks on the homepage and the Leadership Board, in the shared <Link href="/admin/leadership/template" className="underline underline-offset-4">Universal Matrix template</Link>. Upload a transparent portrait above, then position it and customise the decorative text.</p>
+        <div className="mt-4">
+          <MemberCardEditor
+            memberId={m.id} template={template} initial={style} published={m.visibility === "PUBLISHED" && !m.isPlaceholder} hasPhoto={!!m.photoUrl}
+            person={{
+              id: m.id, name: m.fullName, designation: current?.designation.title ?? "Designation", unitName: current?.unit.name ?? null, term: current?.term?.label ?? null,
+              department: m.department, bio: m.bio, skills: m.skills, links: { linkedin: m.linkedinUrl, github: m.githubUrl, portfolio: m.portfolioUrl }, email: m.emailPublic ? m.email : null,
+              photoSrc: m.photoUrl ? `/api/v1/org-members/${m.id}/photo` : null,
+            }}
+          />
+        </div>
+      </section>
 
       <section aria-labelledby="profile-heading" className="mt-10 max-w-2xl"><h2 id="profile-heading" className="text-h3 font-semibold">Profile</h2>
         <div className="mt-4"><JsonForm label="Edit member" url={`/api/v1/admin/members/${m.id}`} method="PATCH" submitLabel="Save profile" fields={[

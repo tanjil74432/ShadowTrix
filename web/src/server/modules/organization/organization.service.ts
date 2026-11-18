@@ -13,8 +13,11 @@ import { normalizeEmail } from "@/server/security/tokens";
 import { drainStorageDeletionsBestEffort } from "@/server/modules/maintenance/storage-deletion.service";
 import { getStorage } from "@/server/storage";
 import { validateUpload } from "@/server/storage/file-validation";
+import { createHash } from "node:crypto";
+import { deleteMemberStyle, getLeadershipTemplate, getMemberStyles } from "./leadership-template.service";
 import type { z } from "zod";
 import type { designationSchema, memberSchema, memberUpdateSchema, membershipSchema, membershipUpdateSchema, organizationSchema, organizationUpdateSchema, termSchema, termUpdateSchema, unitSchema } from "./organization.schema";
+import { verifyPortraitImage } from "./portrait-image";
 
 type Tx = Prisma.TransactionClient;
 const isUnique = (e: unknown) => e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
@@ -270,6 +273,7 @@ export async function deleteMember(actor: Actor, id: string) {
     await writeAudit({ actorId: actor.id, action: "admin.org_member_deleted", entityType: "org_member", entityId: id, before: { name: m.fullName } }, tx);
     return m.photoKey;
   });
+  await deleteMemberStyle(id);
   if (key) await drainStorageDeletionsBestEffort([key]); // the database trigger queued it in the transaction above
 }
 
@@ -324,13 +328,26 @@ export async function deleteMembership(actor: Actor, id: string) {
 
 export const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
 
+/** WebP is accepted for member portraits only (it keeps transparency). Checked by extension, declared type and the file's own header. */
+function validateWebp(upload: { name: string; declaredMime: string; bytes: Uint8Array }) {
+  const b = upload.bytes;
+  const declared = upload.declaredMime.split(";")[0].trim().toLowerCase();
+  if (b.length === 0) return { ok: false as const, reason: "The file is empty." };
+  if (declared && declared !== "application/octet-stream" && declared !== "image/webp") return { ok: false as const, reason: "The file type does not match its extension." };
+  const ascii = (from: number, to: number) => String.fromCharCode(...b.subarray(from, to));
+  if (b.length < 16 || ascii(0, 4) !== "RIFF" || ascii(8, 12) !== "WEBP") return { ok: false as const, reason: "The file content does not match its extension." };
+  return { ok: true as const, extension: "webp", mime: "image/webp", displayName: "portrait.webp" };
+}
+
 /** Photos are PNG or JPEG, up to 2 MB, validated by extension, declared type and magic bytes like every upload. */
 export async function setMemberPhoto(actor: Actor, memberId: string, upload: { name: string; declaredMime: string; bytes: Uint8Array }) {
   assertAdmin(actor);
-  const check = validateUpload(upload);
+  const check = /\.webp$/i.test(upload.name.trim()) ? validateWebp(upload) : validateUpload(upload);
   if (!check.ok) throw new AppError(400, "invalid_file", check.reason);
-  if (!["png", "jpg", "jpeg"].includes(check.extension)) throw new AppError(400, "invalid_file", "A profile photo must be a PNG or JPEG image.");
+  if (!["png", "jpg", "jpeg", "webp"].includes(check.extension)) throw new AppError(400, "invalid_file", "A profile photo must be a PNG, JPEG or WebP image.");
   if (upload.bytes.length > MAX_PHOTO_BYTES) throw new AppError(400, "invalid_file", "A profile photo can be at most 2 MB.");
+  const decoded = await verifyPortraitImage(upload.bytes, check.extension === "png" ? "png" : check.extension === "webp" ? "webp" : "jpeg");
+  if (!decoded.ok) throw new AppError(400, "invalid_file", decoded.reason);
   const storage = getStorage();
   const key = `org-members/${memberId}/${randomUUID()}`;
   const old = await getDb().$transaction(async (tx) => {
@@ -370,7 +387,7 @@ export async function getMemberPhoto(actor: Actor | null, memberId: string) {
   const stored = await getStorage().get(m.photoKey);
   if (!stored) throw notFound("Photo");
   const b = stored.bytes;
-  const mime = b[0] === 0x89 ? "image/png" : "image/jpeg";
+  const mime = b[0] === 0x89 ? "image/png" : b[0] === 0x52 ? "image/webp" : "image/jpeg"; // PNG / WebP ("RIFF") / JPEG; served unchanged, so transparency is preserved
   return { bytes: stored.bytes, mime };
 }
 
@@ -388,7 +405,7 @@ export async function getPublicTeam() {
     where: { member: { visibility: "PUBLISHED", isPlaceholder: false }, unit: { isActive: true } },
     select: {
       displayOrder: true, isArchived: true, startedOn: true, endedOn: true,
-      unit: { select: { id: true, name: true, displayOrder: true } },
+      unit: { select: { id: true, slug: true, name: true, displayOrder: true } },
       designation: { select: { title: true, rankOrder: true } },
       term: { select: { label: true } },
       member: { select: { id: true, slug: true, fullName: true, bio: true, department: true, skills: true, status: true, photoKey: true, linkedinUrl: true, githubUrl: true, portfolioUrl: true, email: true, emailPublic: true } },
@@ -399,18 +416,24 @@ export async function getPublicTeam() {
     bio: r.member.bio, department: r.member.department, skills: r.member.skills, hasPhoto: !!r.member.photoKey,
     links: { linkedin: r.member.linkedinUrl, github: r.member.githubUrl, portfolio: r.member.portfolioUrl },
     email: r.member.emailPublic ? r.member.email : null, startedOn: r.startedOn, endedOn: r.endedOn,
+    // A short fingerprint of the stored photo, so a replaced portrait is not served from a stale browser cache (never the storage key itself).
+    photoVersion: r.member.photoKey ? createHash("sha1").update(r.member.photoKey).digest("hex").slice(0, 8) : null,
   });
   const sort = (a: ReturnType<typeof person>, b: ReturnType<typeof person>) => a.rank - b.rank || a.order - b.order || a.name.localeCompare(b.name);
   const current = rows.filter((r) => !r.isArchived && r.member.status === "ACTIVE");
   const former = rows.filter((r) => r.isArchived || r.member.status === "FORMER");
-  const units = new Map<string, { id: string; name: string; order: number; people: ReturnType<typeof person>[] }>();
+  const units = new Map<string, { id: string; slug: string; name: string; order: number; people: ReturnType<typeof person>[] }>();
   for (const r of current) {
-    const u = units.get(r.unit.id) ?? { id: r.unit.id, name: r.unit.name, order: r.unit.displayOrder, people: [] };
+    const u = units.get(r.unit.id) ?? { id: r.unit.id, slug: r.unit.slug, name: r.unit.name, order: r.unit.displayOrder, people: [] };
     u.people.push(person(r));
     units.set(r.unit.id, u);
   }
+  const ids = [...new Set(rows.map((r) => r.member.id))];
+  const [template, styles] = await Promise.all([getLeadershipTemplate(), getMemberStyles(ids)]);
+  const withStyle = (p: ReturnType<typeof person>) => ({ ...p, style: styles.get(p.id) ?? null });
   return {
-    units: [...units.values()].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name)).map((u) => ({ ...u, people: u.people.sort(sort) })),
-    former: former.map(person).sort(sort),
+    template,
+    units: [...units.values()].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name)).map((u) => ({ ...u, people: u.people.sort(sort).map(withStyle) })),
+    former: former.map(person).sort(sort).map(withStyle),
   };
 }

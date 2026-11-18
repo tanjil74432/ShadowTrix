@@ -42,8 +42,8 @@ export function PhotoUploader({ memberId, hasPhoto }: { memberId: string; hasPho
       <form ref={ref} onSubmit={onSubmit} noValidate className="space-y-3" aria-label="Upload a profile photo">
         {error && <FormAlert>{error}</FormAlert>}
         {done && <FormNotice>Photo saved.</FormNotice>}
-        <Field label="Profile photo" hint="PNG or JPEG, up to 2 MB. Shown publicly only when the profile is verified and published.">
-          {(p) => <Input {...p} name="file" type="file" accept=".png,.jpg,.jpeg" className="h-auto py-2" />}
+        <Field label="Profile photo" hint="PNG, WebP or JPEG, up to 2 MB. For the Matrix card use a portrait whose background is already removed (a transparent PNG or WebP); it is shown exactly as uploaded. Shown publicly only when the profile is verified and published.">
+          {(p) => <Input {...p} name="file" type="file" accept=".png,.jpg,.jpeg,.webp" className="h-auto py-2" />}
         </Field>
         <Button type="submit" variant="secondary" disabled={pending} aria-disabled={pending}>{pending ? "Uploading" : "Upload photo"}</Button>
       </form>

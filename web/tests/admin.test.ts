@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,7 +54,6 @@ const admin = async () => {
 };
 const tag = () => Math.random().toString(36).slice(2, 8);
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
-const JPG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 1, 2]);
 
 describe("every administration function refuses non-administrators", () => {
   it("participants, organizers and judges get 403 from each entry point", async () => {
@@ -319,11 +319,13 @@ describe("leadership and the public team page", () => {
     await expect(org.setMemberPhoto(a.actor, m.id, { name: "fake.png", declaredMime: "image/png", bytes: new Uint8Array([1, 2, 3, 4]) })).rejects.toMatchObject({ code: "invalid_file" });
     await expect(org.setMemberPhoto(a.actor, m.id, { name: "doc.pdf", declaredMime: "application/pdf", bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 1]) })).rejects.toMatchObject({ code: "invalid_file" });
     await expect(org.setMemberPhoto(a.actor, m.id, { name: "big.png", declaredMime: "image/png", bytes: new Uint8Array(2 * 1024 * 1024 + 1).fill(1).map((_, i) => (i < 8 ? PNG[i] : 1)) })).rejects.toMatchObject({ code: "invalid_file" });
-    await org.setMemberPhoto(a.actor, m.id, { name: "me.png", declaredMime: "image/png", bytes: PNG });
+    const decodable = (fmt: "png" | "jpeg") => sharp({ create: { width: 8, height: 8, channels: 4, background: { r: 240, g: 120, b: 50, alpha: 0.5 } } })[fmt]().toBuffer().then((x) => new Uint8Array(x));
+    await expect(org.setMemberPhoto(a.actor, m.id, { name: "me.png", declaredMime: "image/png", bytes: PNG })).rejects.toMatchObject({ code: "invalid_file" }); // a valid header is not an image: it must decode
+    await org.setMemberPhoto(a.actor, m.id, { name: "me.png", declaredMime: "image/png", bytes: await decodable("png") });
     const firstKey = (await getDb().orgMember.findUniqueOrThrow({ where: { id: m.id } })).photoKey!;
     expect(firstKey).toMatch(/^org-members\/[0-9a-f-]{36}\/[0-9a-f-]{36}$/);
     expect((await org.getMemberPhoto(null, m.id)).mime).toBe("image/png"); // verified and published: public
-    await org.setMemberPhoto(a.actor, m.id, { name: "me.jpg", declaredMime: "image/jpeg", bytes: JPG });
+    await org.setMemberPhoto(a.actor, m.id, { name: "me.jpg", declaredMime: "image/jpeg", bytes: await decodable("jpeg") });
     expect(await createLocalStorage(dir).get(firstKey)).toBeNull(); // the old file is gone
     expect((await org.getMemberPhoto(null, m.id)).mime).toBe("image/jpeg");
     await org.updateMember(a.actor, m.id, { visibility: "DRAFT" });

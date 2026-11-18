@@ -1,3 +1,4 @@
+import { portraitPng } from "./helpers/portrait";
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
@@ -8,7 +9,7 @@ const DAY = 86_400_000;
 const tag = () => randomUUID().slice(0, 6);
 const asUser = async (u: TestUser, extra: Record<string, string> = {}) => ({ ...JSON_HEADERS, ...extra, Cookie: `${COOKIE}=${await createRawSession(u.id)}` });
 const cookieOnly = async (u: TestUser) => ({ Cookie: `${COOKIE}=${await createRawSession(u.id)}` });
-const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 73, 72, 68, 82]);
+const PNG = portraitPng(); // a real, decodable image: the member is public while other specs browse the site, and a broken image there would be a real defect
 
 async function axeClean(page: Page, label: string) {
   const results = await new AxeBuilder({ page }).withTags(WCAG).analyze();
