@@ -33,9 +33,9 @@ export default defineConfig({
    * sizes: `npm run test:e2e:cross` (needs `npx playwright install firefox webkit`).
    */
   projects: [
-    { name: "chromium", testIgnore: /cross-browser\.spec\.ts|admin-maintenance\.spec\.ts/, use: { channel: process.env.CI ? undefined : "msedge" } },
-    // Maintenance mode is platform-wide (it pauses every public write), so it runs alone, after the rest of the suite.
-    { name: "chromium-global-state", testMatch: /admin-maintenance\.spec\.ts/, dependencies: ["chromium"], fullyParallel: false, use: { channel: process.env.CI ? undefined : "msedge" } },
+    { name: "chromium", testIgnore: /cross-browser\.spec\.ts|admin-maintenance\.spec\.ts|leadership-fallback\.spec\.ts/, use: { channel: process.env.CI ? undefined : "msedge" } },
+    // Maintenance mode is platform-wide (it pauses every public write), and the leadership fallback test hides every published member, so these run alone, after the rest of the suite.
+    { name: "chromium-global-state", testMatch: /admin-maintenance\.spec\.ts|leadership-fallback\.spec\.ts/, dependencies: ["chromium"], fullyParallel: false, use: { channel: process.env.CI ? undefined : "msedge" } },
     { name: "x-chromium-desktop", testMatch: /cross-browser\.spec\.ts/, use: { ...devices["Desktop Chrome"], channel: process.env.CI ? undefined : "msedge" } },
     { name: "x-firefox-desktop", testMatch: /cross-browser\.spec\.ts/, use: { ...devices["Desktop Firefox"] } },
     { name: "x-webkit-desktop", testMatch: /cross-browser\.spec\.ts/, use: { ...devices["Desktop Safari"] } },

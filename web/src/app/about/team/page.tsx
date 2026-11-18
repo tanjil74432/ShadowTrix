@@ -4,6 +4,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { toCardPerson } from "@/components/leadership/card-person";
 import { LeadershipCard } from "@/components/leadership/leadership-card";
+import { ScrollToHash } from "@/components/layout/scroll-to-hash";
 import { ComingSoon } from "@/components/layout/coming-soon";
 import { Container } from "@/components/ui/container";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -40,6 +41,7 @@ async function TeamContent() {
     <Container className="py-14 sm:py-20">
       <h1 className="text-h1 font-semibold text-balance">Our Team</h1>
       <p className="mt-3 max-w-2xl text-fg-muted text-pretty">The people who run ShadowTrix. The organizers of each event are listed on the event itself.</p>
+      <ScrollToHash />
       {team.units.map((u) => (
         <section key={u.id} id={u.slug} aria-labelledby={`unit-${u.id}`} className="mt-12 scroll-mt-24" data-testid="team-unit">
           <h2 id={`unit-${u.id}`} className="text-h2 font-semibold">{u.name}</h2>

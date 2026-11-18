@@ -20,7 +20,6 @@ const asUser = async (u: TestUser) => ({ ...JSON_HEADERS, Cookie: `${COOKIE}=${a
 const members: string[] = [];
 const units: string[] = [];
 const designations: string[] = [];
-const restore: string[] = []; // published members that were hidden for the fallback test
 
 async function makeMember(opts: { name: string; published: boolean; placeholder?: boolean; unitName?: string; bio?: string }) {
   const t = tag();
@@ -35,7 +34,6 @@ async function makeMember(opts: { name: string; published: boolean; placeholder?
 }
 
 test.afterEach(async () => {
-  if (restore.length) await db().orgMember.updateMany({ where: { id: { in: restore.splice(0) } }, data: { visibility: "PUBLISHED" } });
   await db().siteSetting.deleteMany({ where: { OR: [{ key: "leadership_template" }, { key: { startsWith: "leadership_member:" } }] } });
   await db().orgMember.deleteMany({ where: { id: { in: members.splice(0) } } });
   await db().orgUnit.deleteMany({ where: { id: { in: units.splice(0) } } });
@@ -315,7 +313,7 @@ test.describe("published members appear on the homepage and the Leadership Board
     await expect(page).toHaveURL(new RegExp(`/about/team#${shown.unit.slug}$`));
     await expect(page.locator(`section#${shown.unit.slug}`)).toBeVisible();
     await expect(page.locator(`section#${shown.unit.slug}`).getByRole("heading", { level: 2, name: shown.unit.name })).toBeVisible();
-    expect(await page.evaluate((id) => { const r = document.getElementById(id)!.getBoundingClientRect(); return r.top >= -2 && r.top < window.innerHeight; }, shown.unit.slug)).toBe(true); // the anchor scrolled to it
+    await expect.poll(() => page.evaluate((id) => { const r = document.getElementById(id)!.getBoundingClientRect(); return r.top >= -2 && r.top < window.innerHeight; }, shown.unit.slug), { message: "the anchor scrolled the section into view" }).toBe(true);
   });
 
   test("a contact email is public only while the member allows it: the setting is enforced on the server for the homepage and /about/team", async ({ page, request }) => {
@@ -345,19 +343,6 @@ test.describe("published members appear on the homepage and the Leadership Board
       await expect(card()).toBeVisible();
       await expect(page.getByText(email)).toHaveCount(0);
     }
-  });
-
-  test("with no eligible member the homepage keeps its placeholder profiles as a fallback", async ({ page }) => {
-    test.setTimeout(90_000);
-    const live = await db().orgMember.findMany({ where: { visibility: "PUBLISHED", isPlaceholder: false }, select: { id: true } });
-    restore.push(...live.map((x) => x.id)); // put them back afterwards (the afterEach hook)
-    await db().orgMember.updateMany({ where: { id: { in: live.map((x) => x.id) } }, data: { visibility: "DRAFT" } });
-    await makeMember({ name: `Only Draft ${tag()}`, published: false });
-    await page.goto("/");
-    await expect(page.getByText("Name to be announced").first()).toBeVisible();
-    await expect(page.getByText(/placeholder profiles that show the card layout/)).toBeVisible();
-    await expect(page.getByTestId("leadership-card")).toHaveCount(0);
-    await expect(page.getByRole("navigation", { name: "Teams" }).getByRole("link", { name: "Leadership Board" })).toHaveAttribute("href", "/about/team#executive-board");
   });
 
   test("responsive and accessible: desktop, tablet and phone have no overflow, the whole card is visible, and axe finds no violations", async ({ page, users }) => {
