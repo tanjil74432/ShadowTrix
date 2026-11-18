@@ -2,8 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
+import sharp from "sharp";
 import type { Page } from "@playwright/test";
-import { COOKIE, JSON_HEADERS, createRawSession, db, expect, test, uiLogin, type TestUser } from "./helpers/fixtures";
+import { COOKIE, JSON_HEADERS, ORIGIN, createRawSession, db, expect, test, uiLogin, type TestUser } from "./helpers/fixtures";
 import { PORTRAIT, portraitPng } from "./helpers/portrait";
 
 /**
@@ -377,5 +378,98 @@ test.describe("published members appear on the homepage and the Leadership Board
         if (url === "/about/team") await page.screenshot({ path: path.join(SHOTS, `leadership-board-${vp.n}.png`), fullPage: vp.n !== "desktop" });
       }
     }
+  });
+});
+
+// ───────────────────────── Download template: a high-resolution PNG of the card ─────────────────────────
+
+const SHOTS_DL = process.env.LEAD_SHOTS ? path.resolve(__dirname, "../../docs/reports/leadership-template-download") : path.resolve(__dirname, "../ui-review/leadership-template-download");
+
+/** Clicks "Download template", checks the file name, and returns the PNG. */
+async function downloadTemplate(page: Page): Promise<Buffer> {
+  const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 90_000 }), page.getByRole("button", { name: "Download template" }).click()]);
+  expect(dl.suggestedFilename()).toBe("shadowtrix-leadership-template-2160x2700.png");
+  return fs.readFileSync((await dl.path())!);
+}
+
+/** The picture reduced to 360 x 450 on black, as raw RGB, so a download and a screenshot of the preview can be compared. */
+const normalised = (png: Buffer) => sharp(png).flatten({ background: "#000000" }).resize(360, 450, { fit: "fill", kernel: "lanczos3" }).removeAlpha().raw().toBuffer();
+const meanDifference = (a: Buffer, b: Buffer) => { let sum = 0; for (let i = 0; i < a.length; i++) sum += Math.abs(a[i] - b[i]); return sum / a.length; };
+const countNear = async (png: Buffer, rgb: [number, number, number], tolerance: number) => {
+  const { data, info } = await sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  let n = 0;
+  for (let i = 0; i < info.width * info.height; i++) if (Math.abs(data[i * 3] - rgb[0]) <= tolerance && Math.abs(data[i * 3 + 1] - rgb[1]) <= tolerance && Math.abs(data[i * 3 + 2] - rgb[2]) <= tolerance) n++;
+  return n;
+};
+const previewCard = (page: Page) => page.getByTestId("leadership-preview-frame").getByTestId("leadership-card");
+
+test.describe("download template", () => {
+  test("an administrator downloads a 2160 x 2700 PNG that matches the preview, follows unsaved edits, and includes a member's transparent portrait", async ({ page, request, users }) => {
+    test.setTimeout(240_000);
+    fs.mkdirSync(SHOTS_DL, { recursive: true });
+    const admin = await users.create({ roles: ["ADMIN"], fullName: "Download Admin" });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await uiLogin(page, admin, "/admin/leadership/template");
+    await expect(page.getByRole("heading", { level: 1, name: "Universal Matrix leadership template" })).toBeVisible();
+    await page.waitForTimeout(1500); // hydration
+    await expect(page.getByRole("button", { name: "Download template" })).toBeEnabled();
+    await page.screenshot({ path: path.join(SHOTS_DL, "admin-editor-download-button.png"), fullPage: true });
+
+    // 1. the file: a real, large, sharp PNG of the default template
+    const first = await downloadTemplate(page);
+    const meta = await sharp(first).metadata();
+    expect(meta.format).toBe("png");
+    expect([meta.width, meta.height], "high resolution: 2160 x 2700 (4:5)").toEqual([2160, 2700]);
+    expect(first.length, "a real image, not an empty canvas").toBeGreaterThan(200_000);
+    const stats = await sharp(first).removeAlpha().stats();
+    expect(Math.max(...stats.channels.map((c) => c.stdev)), "the picture has real contrast and detail").toBeGreaterThan(18);
+    expect(await countNear(first, [255, 154, 85], 24), "the designation text (soft orange) is drawn").toBeGreaterThan(2_000);
+    expect(await countNear(first, [245, 245, 245], 12), "the name (white) is drawn").toBeGreaterThan(4_000);
+    const corner = await sharp(first).extractChannel(3).extract({ left: 0, top: 0, width: 2, height: 2 }).raw().toBuffer(); // the card's rounded corner is transparent, not a black box
+    expect(corner[0], "rounded corner outside the card is transparent").toBe(0);
+
+    // 2. the design is preserved: reduced to the preview's size it matches a screenshot of the live preview
+    const livePreview = await previewCard(page).screenshot();
+    const same = meanDifference(await normalised(first), await normalised(livePreview));
+    expect(same, `the download looks like the preview (mean difference ${same.toFixed(2)} of 255)`).toBeLessThan(9);
+    // and it really is a different picture from a deliberately different design
+    expect(meanDifference(await normalised(first), await normalised(await sharp({ create: { width: 360, height: 450, channels: 3, background: "#090909" } }).png().toBuffer())), "not just a flat background").toBeGreaterThan(9);
+    fs.writeFileSync(path.join(SHOTS_DL, "downloaded-template-2160x2700.png"), first);
+    await sharp(first).resize(540).png().toFile(path.join(SHOTS_DL, "downloaded-template-preview-540.png"));
+
+    // 3. it follows what the preview shows, including edits that are not saved yet
+    await page.getByRole("group", { name: "Information board" }).getByLabel("Alignment").selectOption("center");
+    await page.getByRole("group", { name: "Background" }).getByLabel(/^Glow intensity/).fill("100");
+    await expect(page.getByTestId("leadership-board")).toHaveCSS("text-align", "center");
+    const edited = await downloadTemplate(page);
+    expect(await sharp(edited).metadata().then((m) => [m.width, m.height])).toEqual([2160, 2700]);
+    expect(meanDifference(await normalised(first), await normalised(edited)), "the unsaved edits are in the new download").toBeGreaterThan(1.5);
+    const editedDiff = meanDifference(await normalised(edited), await normalised(await previewCard(page).screenshot()));
+    expect(editedDiff, `the edited download matches the edited preview (${editedDiff.toFixed(2)})`).toBeLessThan(9);
+    expect(await db().siteSetting.count({ where: { key: "leadership_template" } }), "downloading changes nothing that is stored").toBe(0);
+
+    // 4. a member's transparent portrait is part of the picture
+    const { m } = await makeMember({ name: "Portrait Download Member", published: true });
+    const up = await request.post(`/api/v1/admin/members/${m.id}/photo`, { headers: { Origin: ORIGIN, Cookie: (await asUser(admin)).Cookie }, multipart: { file: { name: "portrait.png", mimeType: "image/png", buffer: portraitPng() } } });
+    expect(up.status()).toBe(201);
+    await page.goto(`/admin/leadership/template?member=${m.id}`);
+    await expect(previewCard(page).getByTestId("leadership-portrait")).toBeVisible();
+    await expect.poll(() => page.evaluate(() => { const i = document.querySelector('[data-testid="leadership-portrait"]') as HTMLImageElement | null; return !!i && i.complete && i.naturalWidth > 0; })).toBe(true);
+    await page.waitForTimeout(1500);
+    const withPortrait = await downloadTemplate(page);
+    expect(await countNear(withPortrait, [224, 176, 140], 14), "the portrait's skin tones are drawn").toBeGreaterThan(20_000);
+    expect(await countNear(first, [224, 176, 140], 14), "the sample card has no such portrait").toBeLessThan(2_000);
+    const withDiff = meanDifference(await normalised(withPortrait), await normalised(await previewCard(page).screenshot()));
+    expect(withDiff, `with a portrait the download still matches the preview (${withDiff.toFixed(2)})`).toBeLessThan(9);
+    fs.writeFileSync(path.join(SHOTS_DL, "downloaded-template-with-portrait.png"), withPortrait);
+  });
+
+  test("the download is available to administrators only", async ({ page, users }) => {
+    const participant = await users.create({ fullName: "Plain Participant" });
+    await uiLogin(page, participant, "/dashboard");
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await page.goto("/admin/leadership/template");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("You do not have access");
+    await expect(page.getByRole("button", { name: "Download template" })).toHaveCount(0);
   });
 });

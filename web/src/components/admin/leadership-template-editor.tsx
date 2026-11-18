@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { DownloadTemplate } from "@/components/admin/download-template";
 import { TemplateControls } from "@/components/admin/leadership-controls";
 import { LeadershipCard, type CardPerson } from "@/components/leadership/leadership-card";
 import { Button } from "@/components/ui/button";
@@ -99,6 +100,7 @@ export function LeadershipTemplateEditor({ initial, person, members, selectedMem
           <Link href="/about/team" className="text-sm underline underline-offset-4">Open the public Leadership Board</Link>
         </form>
         <DevicePreview person={person} template={preview} />
+        <DownloadTemplate person={person} template={preview} />
       </div>
     </div>
   );
