@@ -61,13 +61,17 @@ function errorCode(e: unknown): string {
 
 export async function drainStorageDeletions(db: PrismaClient, store: ObjectStore, opts: DrainOptions = {}): Promise<DrainResult> {
   const now = opts.now ?? new Date();
-  const lease = new Date(now.getTime() + (opts.leaseSeconds ?? 300) * 1000);
+  const leaseSeconds = opts.leaseSeconds ?? 300;
+  // One clock decides what is due: rows are stamped with the DATABASE's now() when queued, so unless a caller supplies a time (tests do) the claim
+  // uses the database's now() too. Comparing them with this server's clock instead would skip fresh rows whenever the two clocks drift apart.
+  const nowSql = opts.now ? Prisma.sql`${now}` : Prisma.sql`now()`;
+  const leaseSql = opts.now ? Prisma.sql`${new Date(now.getTime() + leaseSeconds * 1000)}` : Prisma.sql`now() + make_interval(secs => ${leaseSeconds}::double precision)`;
   const keysFilter = opts.keys ? Prisma.sql`AND storage_key = ANY(${[...opts.keys]}::text[])` : Prisma.empty;
   const claimed = await db.$queryRaw<{ id: string; storage_key: string; attempts: number }[]>`
-    UPDATE storage_deletions SET locked_until = ${lease}, attempts = attempts + 1
+    UPDATE storage_deletions SET locked_until = ${leaseSql}, attempts = attempts + 1
     WHERE id IN (
       SELECT id FROM storage_deletions
-      WHERE next_attempt_at <= ${now} AND (locked_until IS NULL OR locked_until < ${now}) ${keysFilter}
+      WHERE next_attempt_at <= ${nowSql} AND (locked_until IS NULL OR locked_until < ${nowSql}) ${keysFilter}
       ORDER BY next_attempt_at
       LIMIT ${opts.batchSize ?? 50}
       FOR UPDATE SKIP LOCKED
