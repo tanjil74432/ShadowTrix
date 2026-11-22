@@ -22,13 +22,13 @@ const members: string[] = [];
 const units: string[] = [];
 const designations: string[] = [];
 
-async function makeMember(opts: { name: string; published: boolean; placeholder?: boolean; unitName?: string; bio?: string }) {
+async function makeMember(opts: { name: string; published: boolean; placeholder?: boolean; unitName?: string; bio?: string; department?: string | null; university?: string | null }) {
   const t = tag();
   const unit = await db().orgUnit.create({ data: { slug: `e2e-lt-${t}`, name: opts.unitName ?? `E2E Leadership Board ${t}`, displayOrder: -1000 } });
   units.push(unit.id);
   const des = await db().designation.create({ data: { title: `E2E Founder ${t}`, rankOrder: -1000 } });
   designations.push(des.id);
-  const m = await db().orgMember.create({ data: { slug: `e2e-lt-${t}`, fullName: opts.name, department: "Computer Science and Engineering", bio: opts.bio ?? null, visibility: opts.published ? "PUBLISHED" : "DRAFT", isPlaceholder: opts.placeholder ?? false } });
+  const m = await db().orgMember.create({ data: { slug: `e2e-lt-${t}`, fullName: opts.name, department: opts.department === undefined ? "Computer Science and Engineering" : opts.department, university: opts.university ?? null, bio: opts.bio ?? null, visibility: opts.published ? "PUBLISHED" : "DRAFT", isPlaceholder: opts.placeholder ?? false } });
   members.push(m.id);
   await db().orgMembership.create({ data: { memberId: m.id, unitId: unit.id, designationId: des.id } });
   return { m, unit, des };
@@ -1023,5 +1023,183 @@ test.describe("health of every leadership screen", () => {
     expect(problems, "no console errors, hydration warnings, page errors or failed requests").toEqual([]);
     // the approved logo file is exactly what is in version control (this change never touches it)
     expect(fs.existsSync(path.resolve(__dirname, "../../assets/branding/1.png"))).toBe(true);
+  });
+});
+
+// ───────────────────────── A member's university ─────────────────────────
+
+const SHOTS_UNI = process.env.LEAD_SHOTS ? path.resolve(__dirname, "../../docs/reports/leadership-member-university") : path.resolve(__dirname, "../ui-review/leadership-member-university");
+const squash = (s: string) => s.replace(/\s+/g, " ").trim();
+
+test.describe("a member's university", () => {
+  test("administrators add and edit it in the admin forms (quick choice or any custom name); it is saved without disturbing the rest of the profile", async ({ page, users }) => {
+    test.setTimeout(180_000);
+    fs.mkdirSync(SHOTS_UNI, { recursive: true });
+    const admin = await users.create({ roles: ["ADMIN"], fullName: "University Admin" });
+    const name = `Uni Form Member ${tag()}`;
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await uiLogin(page, admin, "/admin/leadership");
+    await expect(page.getByRole("heading", { level: 1, name: /Leadership and teams/ })).toBeVisible();
+    await page.waitForTimeout(1500); // hydration
+
+    // creating: name, department, and the quick choice for the university
+    const add = page.getByRole("form", { name: "Add a member" });
+    await add.getByLabel(/^Full name/).fill(name);
+    await add.getByLabel(/^Department/).fill("CSE");
+    await expect(add.getByLabel(/^University/)).toHaveValue(""); // nothing is assumed: the university is optional
+    await add.getByRole("button", { name: "Use Eastern University" }).click();
+    await expect(add.getByLabel(/^University/)).toHaveValue("Eastern University");
+    await add.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(SHOTS_UNI, "add-member-form.png"), fullPage: true });
+    await add.getByRole("button", { name: /Add member/ }).click();
+    await expect(page.getByText(/Member added as an unpublished placeholder/)).toBeVisible();
+    const created = await db().orgMember.findFirstOrThrow({ where: { fullName: name } });
+    members.push(created.id);
+    expect([created.department, created.university]).toEqual(["CSE", "Eastern University"]);
+
+    // editing: the form is pre-filled, a custom university can be typed, and the rest of the profile is untouched
+    await db().orgMember.update({ where: { id: created.id }, data: { bio: "Keeps this bio" } });
+    await page.goto(`/admin/leadership/members/${created.id}`);
+    await page.waitForTimeout(1500);
+    const edit = page.getByRole("form", { name: "Edit member" });
+    await expect(edit.getByLabel(/^University/)).toHaveValue("Eastern University");
+    await expect(edit.getByLabel(/^Department/)).toHaveValue("CSE");
+    await edit.getByLabel(/^University/).fill("  Jahangirnagar   University ");
+    await edit.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(SHOTS_UNI, "edit-member-form.png"), fullPage: true });
+    await edit.getByRole("button", { name: "Save profile" }).click();
+    await expect(page.getByText("Saved.")).toBeVisible();
+    let row = await db().orgMember.findUniqueOrThrow({ where: { id: created.id } });
+    expect([row.university, row.department, row.bio], "custom name saved tidily; department and bio untouched").toEqual(["Jahangirnagar University", "CSE", "Keeps this bio"]);
+
+    // the custom name now appears as a suggestion, and the quick choice still works for a second member
+    await page.reload();
+    await page.waitForTimeout(1500);
+    expect(await page.locator("datalist option").evaluateAll((o) => o.map((x) => (x as HTMLOptionElement).value))).toEqual(expect.arrayContaining(["Eastern University", "Jahangirnagar University"]));
+    await edit.getByRole("button", { name: "Use Eastern University" }).click();
+    await edit.getByRole("button", { name: "Save profile" }).click();
+    await expect(page.getByText("Saved.")).toBeVisible();
+    expect((await db().orgMember.findUniqueOrThrow({ where: { id: created.id } })).university).toBe("Eastern University");
+
+    // clearing it removes it (and only it)
+    await page.reload();
+    await page.waitForTimeout(1500);
+    await edit.getByLabel(/^University/).fill("");
+    await edit.getByRole("button", { name: "Save profile" }).click();
+    await expect(page.getByText("Saved.")).toBeVisible();
+    row = await db().orgMember.findUniqueOrThrow({ where: { id: created.id } });
+    expect([row.university, row.department]).toEqual([null, "CSE"]);
+
+    // a too-long name is refused with a message on the field, and nothing is saved
+    await page.reload();
+    await page.waitForTimeout(1500);
+    await edit.getByLabel(/^University/).fill("x".repeat(151));
+    await edit.getByRole("button", { name: "Save profile" }).click();
+    await expect(edit.getByText(/at most 150 characters/)).toBeVisible();
+    expect((await db().orgMember.findUniqueOrThrow({ where: { id: created.id } })).university).toBeNull();
+
+    // the admin pages stay accessible and do not overflow, with the new field
+    const r = await new AxeBuilder({ page }).withTags(WCAG).analyze();
+    expect(r.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(" | ")}`)).toEqual([]);
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await overflowX(page), "no horizontal overflow at phone width").toBeLessThanOrEqual(0);
+  });
+
+  test("the API saves and returns it, validates it, and only administrators can use it", async ({ request, users }) => {
+    const admin = await users.create({ roles: ["ADMIN"], fullName: "University API Admin" });
+    const participant = await users.create({ fullName: "Not An Admin" });
+    const headers = await asUser(admin);
+    const post = await request.post("/api/v1/admin/members", { headers, data: { fullName: `Api Uni Member ${tag()}`, department: "EEE", university: "eastern university" } });
+    expect(post.status()).toBe(201);
+    const { id } = (await post.json()) as { id: string };
+    members.push(id);
+    const read = async () => (await (await request.get(`/api/v1/admin/members/${id}`, { headers })).json()) as { university: string | null; department: string | null };
+    expect(await read()).toMatchObject({ university: "Eastern University", department: "EEE" });
+    expect((await request.patch(`/api/v1/admin/members/${id}`, { headers, data: { university: "Custom University" } })).status()).toBe(200);
+    expect(await read()).toMatchObject({ university: "Custom University", department: "EEE" });
+    expect((await request.patch(`/api/v1/admin/members/${id}`, { headers, data: { bio: "only the bio" } })).status()).toBe(200);
+    expect((await read()).university, "a PATCH that does not mention it keeps it").toBe("Custom University");
+    expect((await request.patch(`/api/v1/admin/members/${id}`, { headers, data: { university: null } })).status()).toBe(200);
+    expect((await read()).university).toBeNull();
+    // validation: a clear message on the field, nothing saved
+    const tooLong = await request.patch(`/api/v1/admin/members/${id}`, { headers, data: { university: "x".repeat(151) } });
+    expect(tooLong.status()).toBe(400);
+    expect(JSON.stringify(await tooLong.json())).toContain("university");
+    for (const bad of ["<b>x</b>", "a\u0000b", 5]) expect((await request.patch(`/api/v1/admin/members/${id}`, { headers, data: { university: bad } })).status(), JSON.stringify(bad)).toBe(400);
+    expect((await read()).university).toBeNull();
+    // permissions: anonymous 401, an ordinary member 403 (create and edit), and nothing changed
+    expect((await request.patch(`/api/v1/admin/members/${id}`, { headers: JSON_HEADERS, data: { university: "Anon" } })).status()).toBe(401);
+    const other = await asUser(participant);
+    expect((await request.patch(`/api/v1/admin/members/${id}`, { headers: other, data: { university: "Hacked" } })).status()).toBe(403);
+    expect((await request.post("/api/v1/admin/members", { headers: other, data: { fullName: "Nope Person", university: "Hacked" } })).status()).toBe(403);
+    expect((await read()).university).toBeNull();
+    expect(await db().orgMember.count({ where: { university: "Hacked" } })).toBe(0);
+  });
+
+  test("the card shows it cleanly next to the department (CSE • Eastern University), alone when there is no department, and nothing at all when a member has none; existing cards are unchanged", async ({ page }) => {
+    test.setTimeout(180_000);
+    fs.mkdirSync(SHOTS_UNI, { recursive: true });
+    const both = await makeMember({ name: `Both Member ${tag()}`, published: true, department: "CSE", university: "Eastern University" });
+    const deptOnly = await makeMember({ name: `Dept Only ${tag()}`, published: true, department: "CSE" }); // a member as it was before the field existed
+    const uniOnly = await makeMember({ name: `Uni Only ${tag()}`, published: true, department: null, university: "Eastern University" });
+    const neither = await makeMember({ name: `Neither ${tag()}`, published: true, department: null });
+    const draft = await makeMember({ name: `Draft Uni ${tag()}`, published: false, department: "CSE", university: "Draft Private University" });
+    const rows = async (card: Locator) => (await card.getByTestId("leadership-row").allInnerTexts()).map(squash);
+    for (const viewport of [{ n: "desktop", w: 1440, h: 900 }, { n: "tablet", w: 820, h: 1100 }, { n: "mobile", w: 390, h: 844 }]) {
+      await page.setViewportSize({ width: viewport.w, height: viewport.h });
+      for (const url of ["/", "/about/team"]) {
+        await page.goto(url);
+        const card = (m: { m: { fullName: string } }) => page.getByTestId("leadership-card").filter({ hasText: m.m.fullName });
+        await expect(card(both)).toBeVisible();
+        await card(both).scrollIntoViewIfNeeded();
+        const at = `${viewport.n} ${url}`;
+        expect(await rows(card(both)), `${at}: department and university on one line`).toContain("CSE • Eastern University");
+        expect(await rows(card(deptOnly)), `${at}: an existing member shows the department exactly as before`).toContain("CSE");
+        expect((await rows(card(deptOnly))).join("|"), `${at}: no stray separator`).not.toContain("•");
+        expect(await rows(card(uniOnly)), `${at}: the university alone`).toContain("Eastern University");
+        const none = await rows(card(neither));
+        expect(none.some((r) => /University|CSE|•/.test(r)), `${at}: a member with neither has no empty academic row (${none.join(" | ")})`).toBe(false);
+        await expect(page.getByText("Draft Private University"), `${at}: a draft's university is never public`).toHaveCount(0);
+        // the board stays inside the card and the page does not overflow
+        const c = (await card(both).boundingBox())!, b = (await card(both).getByTestId("leadership-board").boundingBox())!;
+        expect(b.y + b.height, `${at}: the board is inside the card`).toBeLessThanOrEqual(c.y + c.height + 1);
+        expect(await overflowX(page), `${at}: no overflow`).toBeLessThanOrEqual(0);
+        if (url === "/about/team") await card(both).screenshot({ path: path.join(SHOTS_UNI, `card-department-and-university-${viewport.n}.png`) });
+      }
+    }
+    void draft; void neither;
+    // the same line, in the same dark and orange card, on the Leadership Board's own layout
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/about/team");
+    await page.getByTestId("leadership-card").filter({ hasText: both.m.fullName }).screenshot({ path: path.join(SHOTS_UNI, "card-final.png") });
+
+    // the template switches: hiding the university (or the department) leaves the other
+    await db().siteSetting.upsert({ where: { key: "leadership_template" }, create: { key: "leadership_template", value: { board: { showUniversity: false } } }, update: { value: { board: { showUniversity: false } } } });
+    await page.goto("/about/team");
+    expect(await rows(page.getByTestId("leadership-card").filter({ hasText: both.m.fullName }))).toContain("CSE");
+    await db().siteSetting.update({ where: { key: "leadership_template" }, data: { value: { board: { showDepartment: false } } } });
+    await page.goto("/about/team");
+    expect(await rows(page.getByTestId("leadership-card").filter({ hasText: both.m.fullName }))).toContain("Eastern University");
+  });
+
+  test("the template editor previews it and has a 'Show university' switch that saves", async ({ page, users }) => {
+    test.setTimeout(150_000);
+    const admin = await users.create({ roles: ["ADMIN"], fullName: "University Template Admin" });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await uiLogin(page, admin, "/admin/leadership/template");
+    await expect(page.getByRole("heading", { level: 1, name: "Universal Matrix leadership template" })).toBeVisible();
+    await page.waitForTimeout(1500);
+    const preview = page.getByTestId("leadership-preview").getByTestId("leadership-card");
+    await expect(preview.getByTestId("leadership-row").filter({ hasText: "Eastern University" })).toHaveText(/CSE\s•\sEastern University/);
+    const board = page.getByRole("group", { name: "Information board" });
+    await board.getByLabel("Show university").uncheck();
+    await expect(preview.getByTestId("leadership-row").filter({ hasText: "CSE" })).not.toContainText("Eastern University"); // the preview follows at once
+    await page.getByRole("button", { name: "Save template" }).click();
+    await expect(page.getByRole("status").filter({ hasText: /Template saved/ })).toBeVisible();
+    expect((await db().siteSetting.findUniqueOrThrow({ where: { key: "leadership_template" } })).value).toMatchObject({ board: { showUniversity: false } });
+    await page.reload();
+    await page.waitForTimeout(1500);
+    await expect(page.getByRole("group", { name: "Information board" }).getByLabel("Show university")).not.toBeChecked();
+    await page.screenshot({ path: path.join(SHOTS_UNI, "template-editor-show-university.png"), fullPage: true });
   });
 });

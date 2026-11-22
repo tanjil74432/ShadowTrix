@@ -136,6 +136,7 @@ export function TemplateControls({ t, set }: { t: LeadershipTemplate; set: (next
           <ToggleControl label="Show unit / board" checked={bd.showUnit} onChange={(v) => upd("board", "showUnit", v)} />
           <ToggleControl label="Show term" checked={bd.showTerm} onChange={(v) => upd("board", "showTerm", v)} />
           <ToggleControl label="Show department" checked={bd.showDepartment} onChange={(v) => upd("board", "showDepartment", v)} />
+          <ToggleControl label="Show university" checked={bd.showUniversity} onChange={(v) => upd("board", "showUniversity", v)} />
           <ToggleControl label="Show bio" checked={bd.showBio} onChange={(v) => upd("board", "showBio", v)} />
           <ToggleControl label="Show skills" checked={bd.showSkills} onChange={(v) => upd("board", "showSkills", v)} />
           <ToggleControl label="Show public links" checked={bd.showLinks} onChange={(v) => upd("board", "showLinks", v)} />

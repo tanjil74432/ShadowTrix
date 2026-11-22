@@ -7,6 +7,7 @@ export interface PublicPersonLike {
   designation: string;
   term: string | null;
   department: string | null;
+  university: string | null;
   bio: string | null;
   skills: string[];
   hasPhoto: boolean;
@@ -19,7 +20,7 @@ export interface PublicPersonLike {
 /** The portrait URL is the public photo route; the version only busts the browser cache when a portrait is replaced. */
 export function toCardPerson(p: PublicPersonLike, unitName: string | null): CardPerson {
   return {
-    id: p.id, name: p.name, designation: p.designation, unitName, term: p.term, department: p.department, bio: p.bio, skills: p.skills, links: p.links, email: p.email,
+    id: p.id, name: p.name, designation: p.designation, unitName, term: p.term, department: p.department, university: p.university, bio: p.bio, skills: p.skills, links: p.links, email: p.email,
     photoSrc: p.hasPhoto ? `/api/v1/org-members/${p.id}/photo${p.photoVersion ? `?v=${p.photoVersion}` : ""}` : null,
   };
 }

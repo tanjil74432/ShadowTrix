@@ -15,7 +15,8 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) || undefined;
 const fallback = <Container className="py-14"><Skeleton className="h-96 w-full" /></Container>;
 import { JsonForm } from "@/components/admin/json-form";
-import { listLeadershipReference, listMembers } from "@/server/modules/organization/organization.service";
+import { QUICK_UNIVERSITIES } from "@/lib/leadership/universities";
+import { listLeadershipReference, listMembers, listUniversitySuggestions } from "@/server/modules/organization/organization.service";
 
 export const metadata: Metadata = { title: "Leadership", robots: { index: false, follow: false } };
 
@@ -29,7 +30,7 @@ async function Content({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
   const parsed = z.object({ q: z.string().trim().max(100).optional(), unitId: z.uuid().optional(), status: z.enum(["ACTIVE", "FORMER"]).optional() }).safeParse({ q: first(sp.q), unitId: first(sp.unitId), status: first(sp.status) });
   const f = parsed.success ? parsed.data : {};
-  const [ref, members] = await Promise.all([listLeadershipReference(actor), listMembers(actor, f)]);
+  const [ref, members, universities] = await Promise.all([listLeadershipReference(actor), listMembers(actor, f), listUniversitySuggestions(actor)]);
   return (
     <>
       <h1 className="text-h1 font-semibold">Leadership and teams of ShadowTrix</h1>
@@ -60,7 +61,7 @@ async function Content({ searchParams }: { searchParams: SearchParams }) {
           </ul>
         )}
         <div className="mt-8 max-w-2xl"><h3 className="font-semibold">Add a member</h3>
-          <div className="mt-3"><JsonForm label="Add a member" url="/api/v1/admin/members" submitLabel="Add member (unpublished placeholder)" reset successMessage="Member added as an unpublished placeholder. Open it to add details and positions." fields={[{ name: "fullName", label: "Full name", required: true }]} /></div></div>
+          <div className="mt-3"><JsonForm label="Add a member" url="/api/v1/admin/members" submitLabel="Add member (unpublished placeholder)" reset successMessage="Member added as an unpublished placeholder. Open it to add details and positions." fields={[{ name: "fullName", label: "Full name", required: true }, { name: "department", label: "Department", hint: "Optional, for example CSE." }, { name: "university", label: "University", type: "combo", suggestions: universities, quick: [...QUICK_UNIVERSITIES], hint: "Optional. Type any university, or use the quick choice." }]} /></div></div>
       </section>
 
       <section aria-labelledby="terms-heading" className="mt-12 max-w-3xl">

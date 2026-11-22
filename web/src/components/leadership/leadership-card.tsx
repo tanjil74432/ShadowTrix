@@ -11,6 +11,7 @@ export interface CardPerson {
   unitName?: string | null;
   term?: string | null;
   department?: string | null;
+  university?: string | null;
   bio?: string | null;
   skills?: string[];
   links?: { linkedin?: string | null; github?: string | null; portfolio?: string | null };
@@ -110,7 +111,9 @@ export function LeadershipCard({ person, template: t, style, eager, className }:
   const rows: { key: string; node: ReactNode }[] = [];
   if (board.showUnit && person.unitName) rows.push({ key: "unit", node: <p style={{ color: rgb("#d4d4d4", 0.95) }}>{person.unitName}{board.showTerm && person.term ? `  ·  ${person.term}` : ""}</p> });
   else if (board.showTerm && person.term) rows.push({ key: "term", node: <p style={{ color: rgb("#d4d4d4", 0.95) }}>{person.term}</p> });
-  if (board.showDepartment && person.department) rows.push({ key: "dept", node: <p style={{ color: rgb("#a3a3a3", 1) }}>{person.department}</p> });
+  // department and university share one line ("CSE • Eastern University"); either one alone is shown alone; neither leaves no row
+  const academic = [board.showDepartment ? person.department : null, board.showUniversity ? person.university : null].filter((v): v is string => !!v?.trim());
+  if (academic.length > 0) rows.push({ key: "dept", node: <p style={{ color: rgb("#a3a3a3", 1) }}>{academic.join(" • ")}</p> });
   if (board.showBio && person.bio) rows.push({ key: "bio", node: <p className="line-clamp-3" style={{ color: rgb("#a3a3a3", 1) }}>{person.bio}</p> });
   if (board.showSkills && person.skills && person.skills.length > 0) rows.push({ key: "skills", node: <p style={{ color: rgb("#a3a3a3", 1) }}>{person.skills.join(", ")}</p> });
   if (board.showEmail && person.email) rows.push({ key: "email", node: <p><a href={`mailto:${person.email}`} className="underline underline-offset-2" style={{ color: rgb(board.accent, 1) }}>{person.email}</a></p> });

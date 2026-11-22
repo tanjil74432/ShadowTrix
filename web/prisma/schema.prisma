@@ -825,6 +825,7 @@ model OrgMember {
   photoKey         String?      @map("photo_key")
   bio              String?
   department       String?
+  university       String? // optional: existing members simply have none
   linkedinUrl      String?      @map("linkedin_url")
   githubUrl        String?      @map("github_url")
   portfolioUrl     String?      @map("portfolio_url")

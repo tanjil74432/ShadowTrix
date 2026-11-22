@@ -9,6 +9,7 @@ import { writeAudit } from "@/server/modules/audit/audit.service";
 import { revokeAllUserSessions } from "@/server/modules/auth/session.service";
 import type { Actor } from "@/server/modules/authz/permissions";
 import { slugify } from "@/server/modules/events/event-lifecycle";
+import { QUICK_UNIVERSITIES } from "@/lib/leadership/universities";
 import { normalizeEmail } from "@/server/security/tokens";
 import { drainStorageDeletionsBestEffort } from "@/server/modules/maintenance/storage-deletion.service";
 import { getStorage } from "@/server/storage";
@@ -202,7 +203,7 @@ export async function updateTerm(actor: Actor, id: string, input: z.infer<typeof
 // ───────────────────────────── leadership: members ─────────────────────────────
 
 const MEMBER_ADMIN = {
-  id: true, slug: true, fullName: true, bio: true, department: true, responsibilities: true, linkedinUrl: true, githubUrl: true, portfolioUrl: true, email: true, emailPublic: true,
+  id: true, slug: true, fullName: true, bio: true, department: true, university: true, responsibilities: true, linkedinUrl: true, githubUrl: true, portfolioUrl: true, email: true, emailPublic: true,
   skills: true, status: true, visibility: true, isPlaceholder: true, photoUrl: true, userId: true, updatedAt: true,
   memberships: { select: { id: true, displayOrder: true, isArchived: true, startedOn: true, endedOn: true, unit: { select: { id: true, name: true } }, designation: { select: { id: true, title: true } }, term: { select: { id: true, label: true } } }, orderBy: [{ isArchived: "asc" as const }, { displayOrder: "asc" as const }] },
 } satisfies Prisma.OrgMemberSelect;
@@ -232,13 +233,20 @@ function assertPublishable(m: { visibility: string; isPlaceholder: boolean }) {
   }
 }
 
+/** The universities to offer in the member forms: the quick choices plus every university already used by a member (so a custom name typed once is one click next time). */
+export async function listUniversitySuggestions(actor: Actor): Promise<string[]> {
+  assertAdmin(actor);
+  const used = await getDb().orgMember.findMany({ where: { university: { not: null } }, select: { university: true }, distinct: ["university"], orderBy: { university: "asc" }, take: 200 });
+  return [...new Set([...QUICK_UNIVERSITIES, ...used.map((m) => m.university!).filter(Boolean)])];
+}
+
 export async function createMember(actor: Actor, input: z.infer<typeof memberSchema>) {
   assertAdmin(actor);
   assertPublishable(input);
   return getDb().$transaction(async (tx) => {
     const m = await tx.orgMember.create({
       data: {
-        slug: await uniqueSlug(tx, "orgMember", input.fullName), fullName: input.fullName, bio: input.bio ?? null, department: input.department ?? null, responsibilities: input.responsibilities ?? null,
+        slug: await uniqueSlug(tx, "orgMember", input.fullName), fullName: input.fullName, bio: input.bio ?? null, department: input.department ?? null, university: input.university ?? null, responsibilities: input.responsibilities ?? null,
         linkedinUrl: input.linkedinUrl ?? null, githubUrl: input.githubUrl ?? null, portfolioUrl: input.portfolioUrl ?? null, email: input.email ?? null, emailPublic: input.emailPublic,
         skills: input.skills, status: input.status, visibility: input.visibility, isPlaceholder: input.isPlaceholder,
       },
@@ -256,7 +264,7 @@ export async function updateMember(actor: Actor, id: string, input: z.infer<type
     const merged = { visibility: input.visibility ?? m.visibility, isPlaceholder: input.isPlaceholder ?? m.isPlaceholder };
     assertPublishable(merged);
     const data: Prisma.OrgMemberUpdateInput = {};
-    for (const k of ["fullName", "bio", "department", "responsibilities", "linkedinUrl", "githubUrl", "portfolioUrl", "email", "emailPublic", "skills", "status", "visibility", "isPlaceholder"] as const) {
+    for (const k of ["fullName", "bio", "department", "university", "responsibilities", "linkedinUrl", "githubUrl", "portfolioUrl", "email", "emailPublic", "skills", "status", "visibility", "isPlaceholder"] as const) {
       if (input[k] !== undefined) (data as Record<string, unknown>)[k] = input[k];
     }
     await tx.orgMember.update({ where: { id }, data });
@@ -408,12 +416,12 @@ export async function getPublicTeam() {
       unit: { select: { id: true, slug: true, name: true, displayOrder: true } },
       designation: { select: { title: true, rankOrder: true } },
       term: { select: { label: true } },
-      member: { select: { id: true, slug: true, fullName: true, bio: true, department: true, skills: true, status: true, photoKey: true, linkedinUrl: true, githubUrl: true, portfolioUrl: true, email: true, emailPublic: true } },
+      member: { select: { id: true, slug: true, fullName: true, bio: true, department: true, university: true, skills: true, status: true, photoKey: true, linkedinUrl: true, githubUrl: true, portfolioUrl: true, email: true, emailPublic: true } },
     },
   });
   const person = (r: (typeof rows)[number]) => ({
     id: r.member.id, name: r.member.fullName, designation: r.designation.title, rank: r.designation.rankOrder, order: r.displayOrder, term: r.term?.label ?? null,
-    bio: r.member.bio, department: r.member.department, skills: r.member.skills, hasPhoto: !!r.member.photoKey,
+    bio: r.member.bio, department: r.member.department, university: r.member.university, skills: r.member.skills, hasPhoto: !!r.member.photoKey,
     links: { linkedin: r.member.linkedinUrl, github: r.member.githubUrl, portfolio: r.member.portfolioUrl },
     email: r.member.emailPublic ? r.member.email : null, startedOn: r.startedOn, endedOn: r.endedOn,
     // A short fingerprint of the stored photo, so a replaced portrait is not served from a stale browser cache (never the storage key itself).

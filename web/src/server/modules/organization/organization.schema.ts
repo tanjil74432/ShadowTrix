@@ -1,10 +1,13 @@
 import { z } from "zod";
+import { canonicalUniversity } from "@/lib/leadership/universities";
 import { httpsUrl } from "@/server/modules/submissions/submissions.schema";
 
 const noControl = (v: string) => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f<>]/.test(v);
 const text = (min: number, max: number, label: string) =>
   z.string().trim().min(min, `${label} must be at least ${min} characters.`).max(max, `${label} must be at most ${max} characters.`).refine(noControl, `${label} contains characters that are not allowed.`);
 const optText = (max: number, label: string) => z.union([text(1, max, label), z.literal("").transform(() => null), z.null()]).optional();
+/** The university: optional (empty, blank or null clears it), at most 150 characters, one spelling per university. */
+const optUniversity = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? null : v), text(1, 150, "The university").transform(canonicalUniversity).nullable().optional());
 const optUrl = z.union([httpsUrl, z.literal("").transform(() => null), z.null()]).optional();
 const optDate = z.union([z.iso.date().transform((d) => new Date(`${d}T00:00:00Z`)), z.literal("").transform(() => null), z.null()]).optional();
 
@@ -20,6 +23,7 @@ export const memberSchema = z.object({
   fullName: text(2, 100, "The name"),
   bio: optText(1000, "The bio"),
   department: optText(100, "The department"),
+  university: optUniversity,
   responsibilities: optText(1000, "The responsibilities"),
   linkedinUrl: optUrl,
   githubUrl: optUrl,

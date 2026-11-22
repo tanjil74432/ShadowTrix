@@ -62,6 +62,7 @@ const board = z.object({
   showUnit: z.boolean().default(true),
   showTerm: z.boolean().default(true),
   showDepartment: z.boolean().default(true),
+  showUniversity: z.boolean().default(true), // the member's university, when they have one
   showBio: z.boolean().default(false),
   showSkills: z.boolean().default(false),
   showLinks: z.boolean().default(false),

@@ -10,8 +10,12 @@ import { Field, Input, Select, Textarea } from "@/components/ui/field";
 export interface FieldSpec {
   name: string;
   label: string;
-  type?: "text" | "textarea" | "select" | "checkbox" | "number" | "date" | "url" | "email" | "list";
+  type?: "text" | "textarea" | "select" | "checkbox" | "number" | "date" | "url" | "email" | "list" | "combo";
   options?: { value: string; label: string }[];
+  /** For a "combo" field: names suggested while typing (any other value can still be typed). */
+  suggestions?: string[];
+  /** For a "combo" field: one-click choices shown under the field. */
+  quick?: string[];
   hint?: string;
   required?: boolean;
   defaultValue?: string | boolean | number | null;
@@ -91,6 +95,20 @@ export function JsonForm({ url, method = "POST", fields, submitLabel, successMes
                     </option>
                   ))}
                 </Select>
+              ) : spec.type === "combo" ? (
+                <>
+                  <Input {...p} name={spec.name} type="text" list={`${p.id}-suggestions`} autoComplete="off" defaultValue={spec.defaultValue == null ? "" : String(spec.defaultValue)} />
+                  <datalist id={`${p.id}-suggestions`}>{spec.suggestions?.map((s) => <option key={s} value={s} />)}</datalist>
+                  {!!spec.quick?.length && (
+                    <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label={`Quick choices for ${spec.label}`}>
+                      {spec.quick.map((q) => (
+                        <button key={q} type="button" onClick={() => { const el = ref.current?.elements.namedItem(spec.name) as HTMLInputElement | null; if (el) { el.value = q; el.focus(); } }} className="rounded-md border border-border px-3 py-1 text-sm hover:border-accent/70">
+                          Use {q}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
               ) : (
                 <Input {...p} name={spec.name} type={spec.type === "list" ? "text" : (spec.type ?? "text")} defaultValue={spec.defaultValue == null ? "" : String(spec.defaultValue)} />
               )

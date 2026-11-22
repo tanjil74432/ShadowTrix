@@ -16,7 +16,8 @@ import { JsonForm } from "@/components/admin/json-form";
 import { MemberCardEditor } from "@/components/admin/member-card-editor";
 import { PhotoUploader } from "@/components/admin/photo-uploader";
 import { getLeadershipTemplate, getMemberStyle } from "@/server/modules/organization/leadership-template.service";
-import { getMember, listLeadershipReference } from "@/server/modules/organization/organization.service";
+import { QUICK_UNIVERSITIES } from "@/lib/leadership/universities";
+import { getMember, listLeadershipReference, listUniversitySuggestions } from "@/server/modules/organization/organization.service";
 
 export const metadata: Metadata = { title: "Member", robots: { index: false, follow: false } };
 
@@ -35,9 +36,9 @@ async function Gate({ params }: { params: Params }) {
 async function Detail({ id }: { id: string }) {
   const actor = await requireUser(`/admin/leadership/members/${id}`);
   await connection();
-  let m, ref, template, style;
+  let m, ref, template, style, universities;
   try {
-    [m, ref, template, style] = await Promise.all([getMember(actor, id), listLeadershipReference(actor), getLeadershipTemplate(), getMemberStyle(id)]);
+    [m, ref, template, style, universities] = await Promise.all([getMember(actor, id), listLeadershipReference(actor), getLeadershipTemplate(), getMemberStyle(id), listUniversitySuggestions(actor)]);
   } catch {
     notFound();
   }
@@ -62,7 +63,7 @@ async function Detail({ id }: { id: string }) {
             memberId={m.id} template={template} initial={style} published={m.visibility === "PUBLISHED" && !m.isPlaceholder} hasPhoto={!!m.photoUrl}
             person={{
               id: m.id, name: m.fullName, designation: current?.designation.title ?? "Designation", unitName: current?.unit.name ?? null, term: current?.term?.label ?? null,
-              department: m.department, bio: m.bio, skills: m.skills, links: { linkedin: m.linkedinUrl, github: m.githubUrl, portfolio: m.portfolioUrl }, email: m.emailPublic ? m.email : null,
+              department: m.department, university: m.university, bio: m.bio, skills: m.skills, links: { linkedin: m.linkedinUrl, github: m.githubUrl, portfolio: m.portfolioUrl }, email: m.emailPublic ? m.email : null,
               photoSrc: m.photoUrl ? `/api/v1/org-members/${m.id}/photo` : null,
             }}
           />
@@ -72,7 +73,7 @@ async function Detail({ id }: { id: string }) {
       <section aria-labelledby="profile-heading" className="mt-10 max-w-2xl"><h2 id="profile-heading" className="text-h3 font-semibold">Profile</h2>
         <div className="mt-4"><JsonForm label="Edit member" url={`/api/v1/admin/members/${m.id}`} method="PATCH" submitLabel="Save profile" fields={[
           { name: "fullName", label: "Full name", required: true, defaultValue: m.fullName }, { name: "bio", label: "Bio", type: "textarea", defaultValue: m.bio },
-          { name: "department", label: "Department", defaultValue: m.department }, { name: "responsibilities", label: "Responsibilities", type: "textarea", defaultValue: m.responsibilities },
+          { name: "department", label: "Department", defaultValue: m.department }, { name: "university", label: "University", type: "combo", suggestions: universities, quick: [...QUICK_UNIVERSITIES], hint: "Optional. Type any university, or use the quick choice.", defaultValue: m.university }, { name: "responsibilities", label: "Responsibilities", type: "textarea", defaultValue: m.responsibilities },
           { name: "skills", label: "Skills", type: "list", hint: "Separate with commas.", defaultValue: m.skills.join(", ") },
           { name: "linkedinUrl", label: "LinkedIn", type: "url", defaultValue: m.linkedinUrl }, { name: "githubUrl", label: "GitHub", type: "url", defaultValue: m.githubUrl }, { name: "portfolioUrl", label: "Portfolio", type: "url", defaultValue: m.portfolioUrl },
           { name: "email", label: "Contact email", type: "email", defaultValue: m.email },

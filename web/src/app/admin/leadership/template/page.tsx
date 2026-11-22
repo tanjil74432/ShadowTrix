@@ -16,7 +16,7 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 export const metadata: Metadata = { title: "Leadership template", robots: { index: false, follow: false } };
 
 const SAMPLE: CardPerson = {
-  id: "sample", name: "Aarav Rahman", designation: "President", unitName: "Leadership Board", term: "2026-2027", department: "Computer Science and Engineering",
+  id: "sample", name: "Aarav Rahman", designation: "President", unitName: "Leadership Board", term: "2026-2027", department: "CSE", university: "Eastern University",
   bio: "Builds communities that ship ideas.", skills: ["Leadership", "Python"], links: {}, photoSrc: null,
 };
 
@@ -43,7 +43,7 @@ async function Content({ searchParams }: { searchParams: SearchParams }) {
       const current = m.memberships.find((x) => !x.isArchived) ?? m.memberships[0];
       person = {
         id: m.id, name: m.fullName, designation: current?.designation.title ?? "Designation", unitName: current?.unit.name ?? null, term: current?.term?.label ?? null,
-        department: m.department, bio: m.bio, skills: m.skills, links: { linkedin: m.linkedinUrl, github: m.githubUrl, portfolio: m.portfolioUrl }, email: m.emailPublic ? m.email : null,
+        department: m.department, university: m.university, bio: m.bio, skills: m.skills, links: { linkedin: m.linkedinUrl, github: m.githubUrl, portfolio: m.portfolioUrl }, email: m.emailPublic ? m.email : null,
         photoSrc: m.photoUrl ? `/api/v1/org-members/${m.id}/photo` : null,
       };
     }

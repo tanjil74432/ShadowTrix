@@ -67,7 +67,7 @@ function Person({ p }: { p: Team["units"][number]["people"][number] }) {
       <div>
         <h3 className="text-h3 font-semibold">{p.name}</h3>
         <p className="font-medium text-accent-soft">{p.designation}{p.term ? `, ${p.term}` : ""}</p>
-        {p.department && <p className="text-sm text-fg-muted">{p.department}</p>}
+        {(p.department || p.university) && <p className="text-sm text-fg-muted">{[p.department, p.university].filter(Boolean).join(" • ")}</p>}
       </div>
       {p.bio && <p className="text-sm text-fg-muted text-pretty">{p.bio}</p>}
       {p.skills.length > 0 && <p className="text-sm text-fg-muted">{p.skills.join(", ")}</p>}
